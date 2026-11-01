@@ -350,6 +350,13 @@ OFFICIAL = {
     "hashicorp": "https://releases.hashicorp.com",
     "debian": "https://deb.debian.org/debian",
     "ubuntu": "https://archive.ubuntu.com/ubuntu",
+    "almalinux": "https://repo.almalinux.org/almalinux",
+    "rocky": "https://dl.rockylinux.org/pub/rocky",
+    "epel": "https://dl.fedoraproject.org/pub/epel",
+    "fedora": "https://dl.fedoraproject.org/pub/fedora/linux",
+    "centos": "https://mirror.stream.centos.org",
+    "alpine": "https://dl-cdn.alpinelinux.org/alpine",
+    "archlinux": "https://geo.mirror.pkgbuild.com",
 }
 TITLES = {
     "npm": ("npm", "هش integrity نسخه‌های ثابت بسته‌ها در برابر registry.npmjs.org"),
@@ -365,6 +372,13 @@ TITLES = {
     "hashicorp": ("HashiCorp", "فایل SHA256SUMS هر نسخه در برابر releases.hashicorp.com"),
     "debian": ("Debian", "sha256 چند بستهٔ .deb ثابت در برابر deb.debian.org"),
     "ubuntu": ("Ubuntu", "sha256 چند بستهٔ .deb ثابت در برابر archive.ubuntu.com"),
+    "almalinux": ("AlmaLinux", "sha256 کلیدهای GPG ثابت در برابر repo.almalinux.org"),
+    "rocky": ("Rocky Linux", "sha256 کلیدهای GPG ثابت در برابر dl.rockylinux.org"),
+    "epel": ("EPEL", "sha256 کلیدهای GPG ثابت در برابر dl.fedoraproject.org/pub/epel"),
+    "fedora": ("Fedora", "sha256 فایل‌های ثابت یک نسخهٔ منتشرشده در برابر dl.fedoraproject.org"),
+    "centos": ("CentOS Stream", "sha256 فایل‌های ثابت درخت نصب در برابر mirror.stream.centos.org"),
+    "alpine": ("Alpine", "sha256 فایل‌های ثابت منتشرشدهٔ minirootfs در برابر dl-cdn.alpinelinux.org"),
+    "archlinux": ("Arch Linux", "فایل sha256sums.txt هر ISO ماهانه در برابر geo.mirror.pkgbuild.com"),
 }
 
 
@@ -936,7 +950,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("images", help="file with one name:tag per line")
     ap.add_argument("mirrors", help="file with `name https://host [ip]` per line (Docker registries)")
-    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu)")
+    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux)")
     ap.add_argument("--targets", help="file with `kind name base-url` per line: the mirrors to check for those kinds")
     ap.add_argument("--brand", help="JSON file overriding the page branding (keys of DEFAULT_BRAND)")
     ap.add_argument("--max-seconds", type=int, default=1200,
