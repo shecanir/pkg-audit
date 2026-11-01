@@ -43,7 +43,7 @@ few minutes and let each run check only its share:
 
 ```bash
 python3 pkg_audit.py ... --state site/report.json --json site/report.json \
-  --slots 12 --slot-minutes 5     # cron: */5 * * * *  -> every host once an hour
+  --slots 12 --slot-minutes 5     # run every 5 minutes (serve.py --run-every 5, or cron: */5 * * * *) -> every host once an hour
 ```
 
 - `--slots N` spreads the hosts evenly over N runs; the turn comes from the clock (`--slot-minutes`
@@ -61,6 +61,9 @@ python3 pkg_audit.py ... --state site/report.json --json site/report.json \
 
 ```bash
 python3 serve.py --site site --queue queue.json --cooldown 30 --port 8080
+# the same, and run the auditor itself every 5 minutes (no cron, timer or CI schedule):
+python3 serve.py --site site --queue queue.json --run-every 5 -- images.txt mirrors.txt --state site/report.json \
+  --queue queue.json --slots 12 --json site/report.json --html site/index.html
 python3 pkg_audit.py ... --queue queue.json --state site/report.json ...   # in the CI job
 ```
 
