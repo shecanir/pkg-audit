@@ -357,6 +357,8 @@ OFFICIAL = {
     "centos": "https://mirror.stream.centos.org",
     "alpine": "https://dl-cdn.alpinelinux.org/alpine",
     "archlinux": "https://geo.mirror.pkgbuild.com",
+    "kali": "https://kali.download/kali",
+    "opensuse": "https://download.opensuse.org",
 }
 TITLES = {
     "npm": ("npm", "هش integrity نسخه‌های ثابت بسته‌ها در برابر registry.npmjs.org"),
@@ -378,7 +380,9 @@ TITLES = {
     "fedora": ("Fedora", "sha256 فایل‌های ثابت یک نسخهٔ منتشرشده در برابر dl.fedoraproject.org"),
     "centos": ("CentOS Stream", "sha256 فایل‌های ثابت درخت نصب در برابر mirror.stream.centos.org"),
     "alpine": ("Alpine", "sha256 فایل‌های ثابت منتشرشدهٔ minirootfs در برابر dl-cdn.alpinelinux.org"),
-    "archlinux": ("Arch Linux", "فایل sha256sums.txt هر ISO ماهانه در برابر geo.mirror.pkgbuild.com"),
+    "archlinux": ("Arch Linux", "sha256 چند بستهٔ ثابت در برابر geo.mirror.pkgbuild.com"),
+    "kali": ("Kali Linux", "sha256 بسته‌های .deb ثابت در برابر kali.download"),
+    "opensuse": ("openSUSE", "sha256 کلید GPG ثابت یک نسخهٔ Leap در برابر download.opensuse.org"),
 }
 
 
@@ -950,7 +954,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("images", help="file with one name:tag per line")
     ap.add_argument("mirrors", help="file with `name https://host [ip]` per line (Docker registries)")
-    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux)")
+    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux, kali, opensuse)")
     ap.add_argument("--targets", help="file with `kind name base-url` per line: the mirrors to check for those kinds")
     ap.add_argument("--brand", help="JSON file overriding the page branding (keys of DEFAULT_BRAND)")
     ap.add_argument("--max-seconds", type=int, default=1200,

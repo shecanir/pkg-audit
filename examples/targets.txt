@@ -1,5 +1,5 @@
 # Mirrors checked for each package kind: kind name base-url
-# Kinds: npm pypi cargo maven rubygems nodejs golang gradle helm k8s hashicorp debian ubuntu almalinux rocky epel fedora centos alpine archlinux
+# Kinds: npm pypi cargo maven rubygems nodejs golang gradle helm k8s hashicorp debian ubuntu almalinux rocky epel fedora centos alpine archlinux kali opensuse
 npm       mymirror  https://mirror-npm.example.com
 pypi      mymirror  https://mirror-pypi.example.com
 cargo     mymirror  https://mirror-cargo.example.com/index
