@@ -125,3 +125,20 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 - برای پروژه‌های حساس هش را خودتان ثابت کنید (lockfile با هش، `--require-hashes`، `image@sha256:…`).
 
 اجرا و قالب فایل‌ها در `examples/` است. لایسنس: Apache-2.0.
+
+## Mirrors that only answer from inside Iran
+
+Some mirrors do not answer from outside the country the auditor runs in. Put `via=tunnel` on their
+line of the mirrors/targets file (no address or secret in it) and give the process an environment
+variable `AUDIT_SOCKS=host:port` pointing at a SOCKS5 proxy whose far end is inside Iran, for
+example `ssh -N -D 0.0.0.0:1080 user@server-in-iran` run next to the auditor:
+
+```
+debian mirror.example.ir https://mirror.example.ir/debian via=tunnel
+```
+
+Those mirrors (and only those) are asked through the proxy, which resolves their names, so they are
+looked up and fetched from where the tunnel ends; the official sources are always asked directly.
+The report marks them `"via": "tunnel"`. Without `AUDIT_SOCKS` the marker is ignored and they are asked
+directly. How the tunnel connects (address, user, key) is kept out of this program and out of the
+repository: it only ever sees the proxy's address.

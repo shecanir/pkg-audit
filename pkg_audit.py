@@ -106,17 +106,81 @@ class Pinned(http.client.HTTPSConnection):
         self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
 
 
+# Mirrors that do not answer from outside Iran can be asked through a tunnel to a server inside it:
+# AUDIT_SOCKS=host:port of a local SOCKS5 proxy (an `ssh -N -D` to the Iranian server). Which mirrors
+# use it is marked with `via=tunnel` in their line of the mirrors/targets file (no secret there);
+# how the tunnel connects is not this program's business and is never read or printed by it. The
+# official sources are always asked directly. Without AUDIT_SOCKS a marked mirror is asked directly.
+VIA_TUNNEL = set()
+
+
+def tunnel_address():
+    value = os.environ.get("AUDIT_SOCKS", "").strip()
+    host, _, port = value.rpartition(":")
+    return (host, int(port)) if host and port.isdigit() else None
+
+
+def via_tunnel(url):
+    return tunnel_address() is not None and any(url.rstrip("/").startswith(base) for base in VIA_TUNNEL)
+
+
+def _recv_exact(sock, n):
+    data = b""
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            raise RuntimeError("tunnel closed the connection")
+        data += chunk
+    return data
+
+
+def socks_connect(proxy, host, port, timeout):
+    """TCP connection to host:port through a SOCKS5 proxy (no authentication; the name is resolved by
+    the proxy, so a mirror is looked up from where the tunnel ends)."""
+    sock = socket.create_connection(proxy, timeout)
+    try:
+        sock.sendall(b"\x05\x01\x00")
+        if _recv_exact(sock, 2) != b"\x05\x00":
+            raise RuntimeError("tunnel proxy wants authentication")
+        name = host.encode("idna")
+        sock.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + port.to_bytes(2, "big"))
+        head = _recv_exact(sock, 4)
+        if head[1] != 0:
+            raise RuntimeError(f"tunnel could not reach {host} (SOCKS code {head[1]})")
+        _recv_exact(sock, {1: 4, 4: 16}.get(head[3]) or _recv_exact(sock, 1)[0])
+        _recv_exact(sock, 2)
+        return sock
+    except BaseException:
+        sock.close()
+        raise
+
+
+class TunnelHTTPS(http.client.HTTPSConnection):
+    """HTTPS through the tunnel; SNI and certificate check stay on the host name."""
+
+    def connect(self):
+        sock = socks_connect(tunnel_address(), self.host, self.port, self.timeout)
+        self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+
+
+class TunnelHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(TunnelHTTPS, req)
+
+
 class Registry:
     """Anonymous pull access to one registry, following its Bearer challenge."""
 
     def __init__(self, base, ip=None):
         parts = urllib.parse.urlsplit(base)
         self.host, self.port, self.ip = parts.hostname, parts.port or 443, ip
+        self.tunnel = via_tunnel(base)
         self.tokens = {}
 
     def request(self, method, path, repo, hops=0):
         for attempt in range(2):
-            conn = (Pinned(self.host, self.ip, port=self.port, timeout=30) if self.ip
+            conn = (TunnelHTTPS(self.host, self.port, timeout=30) if self.tunnel
+                    else Pinned(self.host, self.ip, port=self.port, timeout=30) if self.ip
                     else http.client.HTTPSConnection(self.host, self.port, timeout=30))
             headers = {"Accept": ACCEPT, "User-Agent": "pkg-audit/1"}
             if repo in self.tokens:
@@ -136,7 +200,8 @@ class Registry:
                         return self.request(method, target.path + ("?" + target.query if target.query else ""),
                                             repo, hops + 1)
                     follow = urllib.request.Request(target.geturl(), method=method, headers={"Accept": ACCEPT})
-                    with urllib.request.urlopen(follow, timeout=30) as final:
+                    opener = urllib.request.build_opener(TunnelHandler) if self.tunnel else urllib.request.build_opener()
+                    with opener.open(follow, timeout=30) as final:
                         return final.status, final, final.read()
                 return resp.status, resp, body
             finally:
@@ -173,8 +238,15 @@ def split(ref):
 
 
 def read_list(path):
-    return [line.split("#", 1)[0].split() for line in Path(path).read_text().splitlines()
+    """Fields of every non-empty line. A `via=tunnel` field is taken out and the mirror address on
+    that line (the field starting with http) is remembered as one to ask through the tunnel."""
+    rows = [line.split("#", 1)[0].split() for line in Path(path).read_text().splitlines()
             if line.split("#", 1)[0].strip()]
+    for fields in rows:
+        if "via=tunnel" in fields:
+            fields.remove("via=tunnel")
+            VIA_TUNNEL.update(f.rstrip("/") for f in fields if f.startswith("http"))
+    return rows
 
 
 def check_rows(items, rows, check):
@@ -300,9 +372,10 @@ def get(url, accept="*/*", tries=3):
     """GET with a few retries: a mirror or the official source resetting one connection is not a verdict."""
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "pkg-audit/1"})
     last = None
+    opener = urllib.request.build_opener(TunnelHandler) if via_tunnel(url) else urllib.request.build_opener()
     for attempt in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with opener.open(req, timeout=45) as resp:
                 return resp.headers.get("Content-Type", ""), resp.read()
         except urllib.error.HTTPError as exc:
             if exc.code < 500 and exc.code != 429:
@@ -915,6 +988,10 @@ def main():
     run_jobs(mirror_jobs, args.workers)
     report = {"generated": now_iso(), "groups": [g for g, _, _ in plans if g["items"]]}
     settle(report, active)
+    for g in report["groups"]:  # say in the report which mirrors were asked from inside Iran
+        for m in g["mirrors"].values():
+            if via_tunnel(m["url"]):
+                m["via"] = "tunnel"
     if args.queue:
         queue_remove(args.queue, [f"{gid}/{name}" for gid, name in asked])
         waiting = queue_read(args.queue)
