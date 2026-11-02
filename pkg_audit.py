@@ -740,7 +740,82 @@ details.m summary{grid-template-columns:minmax(0,1fr) auto 18px;padding:12px 14p
 .strip{grid-column:1/-1;order:5}
 .items{padding:2px 14px 10px}
 }
+
+/* --- modern layer --- */
+:root{--r:20px;--shadow:0 1px 2px rgba(14,34,24,.04),0 8px 28px -12px rgba(14,34,24,.14);--glow:#157a4a14}
+@media(prefers-color-scheme:dark){:root{--shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 30px -14px rgba(0,0,0,.6);--glow:#6fd69a12}}
+body{background:radial-gradient(1100px 420px at 85% -80px,var(--glow),transparent 70%),var(--bg);min-height:100vh}
+.wrap{max-width:1040px}
+header{padding-top:22px}header img{box-shadow:var(--shadow)}
+h1{font-size:clamp(30px,6vw,52px);letter-spacing:-.025em;margin:26px 0 10px}
+h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:16px}
+.verdict{border-radius:var(--r);padding:18px 22px;box-shadow:var(--shadow);border:1px solid color-mix(in srgb,currentColor 18%,transparent)}
+.verdict b{font-size:24px;letter-spacing:-.01em}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0 8px}
+.nums span{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;box-shadow:var(--shadow);font-size:12.5px;line-height:1.5}
+.nums b:first-child{display:block;font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.search{position:relative;margin:18px 0 4px}
+.search input{width:100%;font:500 15px var(--font);color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:999px;
+padding:13px 48px 13px 20px;box-shadow:var(--shadow);outline:none;transition:border-color .15s,box-shadow .15s}
+.search input::placeholder{color:var(--muted)}
+.search input:focus{border-color:var(--primary);box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 18%,transparent)}
+.search svg{position:absolute;inset-inline-start:auto;right:18px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted);pointer-events:none}
+.search kbd{position:absolute;left:16px;top:50%;transform:translateY(-50%);font:600 11.5px ui-monospace,Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
+.search input:not(:placeholder-shown)~kbd{display:none}
+#sres{color:var(--muted);font-size:13px;min-height:22px;margin:8px 4px 0}
+nav.tabs{padding:12px 0}
+nav.tabs a{padding:5px 16px;transition:all .15s;box-shadow:var(--shadow)}
+nav.tabs a:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
+nav.tabs a.off{opacity:.35}
+h2.gt{font-size:23px;letter-spacing:-.015em;margin-top:38px}
+.list{border-radius:var(--r);box-shadow:var(--shadow)}
+details.m{transition:background .15s}details.m summary{padding:15px 20px}
+details.m[open]{background:color-mix(in srgb,var(--glow) 100%,transparent)}
+details.m[open] summary{border-bottom:0}
+details.m summary:hover{background:var(--glow)}
+.who .host{font-size:13.5px;font-weight:600}
+.score{font-size:19px}
+.sq{width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 2px var(--card)}
+.b{padding:2px 11px}
+.items li:hover{background:var(--glow)}
+.items li{padding:8px 6px;border-radius:8px}
+.hide{display:none!important}
+.re{transition:all .15s}.re:hover:not(:disabled){background:var(--primary);color:#fff}
+section.note{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:8px 26px 20px;box-shadow:var(--shadow)}
+footer{margin-top:10px}
+@media(max-width:680px){.nums{grid-template-columns:repeat(2,1fr)}.search input{font-size:14px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 """
+
+SEARCH = r'''<script>
+(function(){var q=document.getElementById('q'),res=document.getElementById('sres');if(!q)return;
+var groups=[].map.call(document.querySelectorAll('h2.gt'),function(h){
+  var note=h.nextElementSibling,list=note.nextElementSibling;
+  return{h:h,note:note,list:list,rows:[].slice.call(list.querySelectorAll('details.m')),tab:document.querySelector('nav.tabs a[href="#'+h.id+'"]')}});
+var opened=new WeakMap();
+function norm(t){return t.toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک')}
+function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),hits=0,hosts=0;
+  groups.forEach(function(g){var gtext=norm(g.h.textContent),shown=0;
+    g.rows.forEach(function(d){
+      var hay=norm(d.textContent)+' '+gtext,ok=words.every(function(w){return hay.indexOf(w)>-1});
+      d.classList.toggle('hide',!ok);
+      if(ok){shown++;
+        if(words.length){if(!opened.has(d))opened.set(d,d.open);d.open=true;
+          d.querySelectorAll('.items li').forEach(function(li){li.classList.toggle('hide',!words.every(function(w){return norm(li.textContent+' '+d.querySelector('.host').textContent).indexOf(w)>-1}) && !words.every(function(w){return norm(d.querySelector('.host').textContent+' '+gtext).indexOf(w)>-1}))})}
+        else{if(opened.has(d)){d.open=opened.get(d);opened.delete(d)}d.querySelectorAll('.items li').forEach(function(li){li.classList.remove('hide')})}}
+    });
+    var on=shown>0||!words.length;
+    [g.h,g.note,g.list].forEach(function(e){e.classList.toggle('hide',!on)});
+    if(g.tab)g.tab.classList.toggle('off',!on);
+    hits+=shown;});
+  res.textContent=words.length?(hits?hits.toLocaleString('fa-IR')+' میرور پیدا شد':'چیزی پیدا نشد؛ نام میزبان، اکوسیستم یا بسته را امتحان کنید'):''}
+q.addEventListener('input',run);
+document.addEventListener('keydown',function(e){
+  if(e.key==='/'&&document.activeElement!==q&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();q.focus()}
+  else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}});
+})();
+</script>'''
 
 
 STALE_AFTER = 3 * 3600   # a result older than this is shown as old
@@ -920,6 +995,9 @@ def page(report):
 <div class="nums"><span><b>{fa(len(seen))}</b> میزبان</span><span><b>{fa(len(groups))}</b> اکوسیستم</span>
 <span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
 <span><b>{fa(counts["error"])}</b> بدون پاسخ</span></div>
+<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input id="q" type="search" placeholder="جست‌وجوی میزبان، اکوسیستم یا بسته… (مثلاً liara، npm، lodash)" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
+<div id="sres" role="status" aria-live="polite"></div>
 <nav class="tabs">{nav}</nav>
 {sections}
 <div class="legend">{legend}</div>
@@ -941,7 +1019,7 @@ def page(report):
 <bdi dir="ltr">alpine:3.20@sha256:…</bdi>. آن‌وقت هیچ میرور نمی‌تواند محتوای دیگری بدهد. خروجی کامل:
 <a href="/report.json" dir="ltr">report.json</a>.</p></section>
 <footer>{BRAND["footer_html"]}</footer>
-</div>{script}</body></html>"""
+</div>{SEARCH}{script}</body></html>"""
 
 
 def write_atomic(path, text):

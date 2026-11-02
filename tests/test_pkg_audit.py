@@ -253,7 +253,8 @@ class Page(unittest.TestCase):
             "m": {"url": "https://m.example", "ip": None,
                   "rows": {"x@1": {"verdict": "mismatch", "value": "<script>", "detail": ""}}}}}
         out = pa.page({"generated": "2026-01-01T00:00:00Z", "groups": [group]})
-        self.assertNotIn("<script>", out)
+        self.assertEqual(out.count("<script>"), 1)  # only the page's own search script; the value is escaped
+        self.assertIn("&lt;script&gt;", out)
         self.assertIn("&lt;b&gt;us&lt;/b&gt;", out)
         self.assertIn("ناهمخوان", out)
         # the headline names the mirror, the ecosystem and the item
