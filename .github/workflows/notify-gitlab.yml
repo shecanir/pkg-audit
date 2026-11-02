@@ -1,0 +1,27 @@
+# A push to main starts the audit pipeline on Shecan's GitLab with this exact commit, so the page
+# runs the new auditor as soon as it is merged. Needs the repository secret GITLAB_TRIGGER_TOKEN
+# (GitLab: project shecan-pkg/pkg.shecan > Settings > CI/CD > Pipeline trigger tokens). The pipeline
+# only runs the `audit` job, which installs this commit on the check server.
+name: Start the audit pipeline on GitLab
+on:
+  push:
+    branches: [main]
+permissions: {}
+concurrency:
+  group: notify-gitlab
+  cancel-in-progress: false
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger the pipeline
+        env:
+          TOKEN: ${{ secrets.GITLAB_TRIGGER_TOKEN }}
+          SHA: ${{ github.sha }}
+        run: |
+          [ -n "$TOKEN" ] || { echo "GITLAB_TRIGGER_TOKEN is not set; nothing triggered"; exit 0; }
+          curl --fail-with-body -sS --retry 3 --max-time 60 -X POST \
+            --form "token=$TOKEN" --form "ref=main" \
+            --form "variables[PKG_AUDIT_COMMIT]=$SHA" --form "variables[PKG_AUDIT_TRIGGER]=1" \
+            "https://gitlab.shcn.ir/api/v4/projects/223/trigger/pipeline" | python3 -c "import json,sys; print('pipeline', json.load(sys.stdin).get('web_url'))"
