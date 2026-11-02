@@ -655,6 +655,7 @@ DEFAULT_BRAND = {
     "tagline": "",                   # line under it
     "description": "مقایسه‌ی مستقل بسته‌ها و ایمیج‌های میرورها با منبع رسمی",
     "footer_html": "",               # trusted HTML for the page footer
+    "credits_html": "",              # trusted HTML: extra <li> items (your own deployment tools) in the credits section
     "site_url": "",                  # public URL of the page, e.g. https://audit.example.com; enables link previews
     "source_url": "",                # public repository of this tool; shown in the header and the notes
     "og_image": "/og.jpg",
@@ -981,6 +982,7 @@ def page(report):
     src_link = f'<a class="src" href="{html.escape(src)}" rel="noopener">{src_label} ↗</a>' if src else ""
     src_note = (f'<p>کد این بازرس متن‌باز است و هر کسی می‌تواند بخواند، اجرا کند و میرور خودش را اضافه کند: '
                 f'<a href="{html.escape(src)}" dir="ltr">{src_label}</a>.</p>') if src else ""
+    credits = BRAND["credits_html"]
     script = SCRIPT.replace("__MIN__", str(int(BRAND["recheck_minutes"]))) if BRAND["recheck_minutes"] > 0 else ""
     social = ""
     if BRAND["site_url"]:
@@ -1033,6 +1035,12 @@ def page(report):
 <bdi dir="ltr">pip --require-hashes</bdi>)، <bdi dir="ltr">distributionSha256Sum</bdi> در Gradle Wrapper، و در Docker
 <bdi dir="ltr">alpine:3.20@sha256:…</bdi>. آن‌وقت هیچ میرور نمی‌تواند محتوای دیگری بدهد. خروجی کامل:
 <a href="/report.json" dir="ltr">report.json</a>.</p></section>
+<section class="note credits"><h2>ابزارها و فونت‌های متن‌باز</h2>
+<p>این صفحه با ابزارهای آزاد ساخته شده و اجرا می‌شود؛ حقوق و مجوز هر کدام برای صاحبان آن‌هاست:</p>
+<ul>
+<li><a href="https://www.python.org" rel="noopener" dir="ltr">Python</a> (مجوز PSF): بازرس و سرور این صفحه فقط با کتابخانه‌ی استاندارد پایتون نوشته شده‌اند، بدون وابستگی بیرونی.</li>
+<li><a href="https://github.com/rastikerdar/vazirmatn" rel="noopener" dir="ltr">Vazirmatn</a>، اثر زنده‌یاد صابر راستی‌کردار (مجوز SIL Open Font License 1.1): فونت این صفحه.</li>
+{credits}</ul></section>
 <footer>{BRAND["footer_html"]}</footer>
 </div>{SEARCH}{script}</body></html>"""
 
