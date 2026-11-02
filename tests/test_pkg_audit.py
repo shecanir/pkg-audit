@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Offline tests: no network. Run: python3 tests/test_pkg_audit.py"""
+import contextlib
 import importlib.util
+import io
 import json
 import sys
 import tempfile
@@ -36,6 +38,15 @@ class Paths(unittest.TestCase):
                                      ["c", "https://c", "192.0.2.1"], ["d", "https://d", "quay.io", "192.0.2.2"]]),
             [("a", "https://a", "registry-1.docker.io", None), ("b", "https://b", "mcr.microsoft.com", None),
              ("c", "https://c", "registry-1.docker.io", "192.0.2.1"), ("d", "https://d", "quay.io", "192.0.2.2")])
+
+    def test_a_mirror_whose_registry_has_no_image_is_left_out_with_a_warning(self):
+        mirrors = [("hub", "https://hub", "registry-1.docker.io", None), ("typo", "https://t", "mcr.microsoft.co", None)]
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            kept = pa.mirrors_with_images(mirrors, {"registry-1.docker.io": ["alpine:3.20"]})
+        self.assertEqual(kept, mirrors[:1])
+        self.assertIn("typo", err.getvalue())
+        self.assertIn("mcr.microsoft.co", err.getvalue())
 
 
 class Values(unittest.TestCase):
@@ -83,7 +94,7 @@ def run_group(kind, items, targets, workers=1, active=None, prior=None):
     """Drive package_group the way main() does."""
     active = {n for n, _ in targets} if active is None else active
     group, official, after = pa.package_group(kind, items, targets, active, prior)
-    pa.run_jobs([official] if official else [], workers)
+    pa.run_jobs(official, workers)
     pa.run_jobs(after(), workers)
     return group
 
@@ -157,7 +168,8 @@ class Verdicts(unittest.TestCase):
             mirrors = [("hub", "https://hub.mirror", "registry-1.docker.io", None),
                        ("mcr", "https://mcr.mirror", "mcr.microsoft.com", None)]
             group, official, after = pa.docker_group(refs, mirrors, {"hub", "mcr"})
-            official[1]()
+            self.assertEqual([host for host, _ in official], ["mcr.microsoft.com", "registry-1.docker.io"])
+            pa.run_jobs(official, 1)
             pa.run_jobs(after(), 1)
         finally:
             pa.Registry = real
@@ -182,7 +194,7 @@ class Verdicts(unittest.TestCase):
             group, official, after = pa.docker_group(
                 ["mcr.microsoft.com/x/y:1"], [("mcr", "https://mcr.mirror", "mcr.microsoft.com", None)],
                 {"mcr"}, {"mirrors": {"mcr": old}})
-            official[1]()
+            pa.run_jobs(official, 1)
             self.assertEqual(after(), [])
         finally:
             pa.Registry = real
@@ -234,7 +246,7 @@ class Turns(unittest.TestCase):
 
     def test_no_official_request_when_no_mirror_of_a_group_is_due(self):
         group, official, after = pa.package_group("npm", ["a@1"], [("m", "https://m")], set(), None)
-        self.assertIsNone(official)
+        self.assertEqual(official, [])
         self.assertEqual(after(), [])
 
 
