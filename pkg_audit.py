@@ -784,7 +784,16 @@ details.m summary:hover{background:var(--glow)}
 .re{transition:all .15s}.re:hover:not(:disabled){background:var(--primary);color:#fff}
 section.note{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:8px 26px 20px;box-shadow:var(--shadow)}
 footer{margin-top:10px}
-@media(max-width:680px){.nums{grid-template-columns:repeat(2,1fr)}.search input{font-size:14px}}
+.verdict details{width:100%}
+.verdict summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px}
+.verdict summary::-webkit-details-marker{display:none}
+.verdict .verdict summary b,.verdict summary b{font-size:19px}
+.vhint{margin-inline-start:auto;font:600 12.5px var(--font);color:var(--muted);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:999px;padding:2px 12px}
+.vhint:after{content:" ‹";display:inline-block;transition:transform .15s}
+details[open]>summary .vhint:after{transform:rotate(-90deg)}
+.verdict details[open]>summary{margin-bottom:6px}
+.verdict{padding:12px 20px}
+@media(max-width:680px){.search kbd{display:none}.nums{grid-template-columns:repeat(2,1fr)}.search input{font-size:14px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 """
 
@@ -958,6 +967,12 @@ def page(report):
                ((f"<p>بدون پاسخ:</p>{err}") if err else "")
     else:
         vclass, vtext, vsub = "good", "همه‌چیز با منبع رسمی می‌خواند", "هیچ ناهمخوانی دیده نشد"
+    if vclass == "good" or not vsub.startswith("<"):
+        verdict_body = f'<div><b>{vtext}</b><div class="vsub">{vsub}</div></div>'
+    else:  # problems are listed behind a summary: open when something does not match, closed when it is only old or silent
+        opened = " open" if vclass == "alert" else ""
+        verdict_body = (f'<details class="vd"{opened}><summary><b>{vtext}</b>'
+                        f'<span class="vhint">جزئیات</span></summary><div class="vsub">{vsub}</div></details>')
     nav = "".join(f'<a href="#{g["id"]}">{html.escape(g["title"])}</a>' for g in groups)
     sections = "".join(render_group(g, fa) for g in groups)
 
@@ -991,12 +1006,12 @@ def page(report):
 <h1>پایش <span>میرورها</span></h1>
 <p class="lead">بسته‌ها و ایمیج‌های پرکاربرد را از هر میرور می‌پرسیم و با پاسخ منبع رسمی مقایسه می‌کنیم،
 از سروری مستقل از میرورها. آخرین بررسی: {when}. هر ساعت تکرار می‌شود.</p>
-<div class="verdict {vclass}"><div><b>{vtext}</b><div class="vsub">{vsub}</div></div></div>
+<div class="verdict {vclass}">{verdict_body}</div>
 <div class="nums"><span><b>{fa(len(seen))}</b> میزبان</span><span><b>{fa(len(groups))}</b> اکوسیستم</span>
 <span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
 <span><b>{fa(counts["error"])}</b> بدون پاسخ</span></div>
 <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-<input id="q" type="search" placeholder="جست‌وجوی میزبان، اکوسیستم یا بسته… (مثلاً liara، npm، lodash)" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
+<input id="q" type="search" placeholder="جست‌وجو: liara، npm، lodash…" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
 <div id="sres" role="status" aria-live="polite"></div>
 <nav class="tabs">{nav}</nav>
 {sections}
