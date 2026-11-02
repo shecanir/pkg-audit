@@ -399,15 +399,19 @@ TITLES = {
 }
 
 
-def get(url, accept="*/*", tries=3):
-    """GET with a few retries: a mirror or the official source resetting one connection is not a verdict."""
+def get(url, accept="*/*", tries=3, limit=None):
+    """GET with a few retries: a mirror or the official source resetting one connection is not a verdict.
+    With a limit, a body longer than that many bytes is an error (and is not read past the limit)."""
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "pkg-audit/1"})
     last = None
     opener = urllib.request.build_opener(TunnelHandler) if via_tunnel(url) else urllib.request.build_opener()
     for attempt in range(tries):
         try:
             with opener.open(req, timeout=45) as resp:
-                return resp.headers.get("Content-Type", ""), resp.read()
+                body = resp.read() if limit is None else resp.read(limit + 1)
+                if limit is not None and len(body) > limit:
+                    raise RuntimeError(f"answer longer than {limit} bytes")
+                return resp.headers.get("Content-Type", ""), body
         except urllib.error.HTTPError as exc:
             if exc.code < 500 and exc.code != 429:
                 raise RuntimeError(f"HTTP {exc.code}")
@@ -445,13 +449,32 @@ def go_escape(value):
     return re.sub(r"[A-Z]", lambda match: "!" + match.group(0).lower(), value)
 
 
-def go_module_hash(body):
+# A module zip comes from the mirror under test, so it is not trusted to be small: the zip as served
+# and its files unpacked (a zip bomb is tens of kilobytes) are each held to this many bytes. `go`
+# itself refuses a module zip over 500 MiB; the small modules worth listing are far below this.
+GO_ZIP_LIMIT = 200 << 20
+
+
+def go_module_hash(body, limit=GO_ZIP_LIMIT):
     """The `h1:` hash go.sum records for a module zip: sha256 of the sorted `sha256  name` lines of
-    its files, so it is the value `go` itself verifies (and does not depend on how the zip is packed)."""
+    its files, so it is the value `go` itself verifies (and does not depend on how the zip is packed).
+    Files are hashed a chunk at a time; more than `limit` bytes unpacked in all is an error."""
+    files, total = [], 0
     with zipfile.ZipFile(io.BytesIO(body)) as archive:
-        files = sorted((info.filename, hashlib.sha256(archive.read(info)).hexdigest())
-                       for info in archive.infolist() if not info.is_dir())
-    summary = "".join(f"{digest}  {name}\n" for name, digest in files)
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            # The size the zip states, checked before anything is unpacked. zipfile never unpacks a
+            # file past its stated size (and fails its CRC check if there was more), so it holds.
+            total += info.file_size
+            if total > limit:
+                raise RuntimeError(f"module zip unpacks to more than {limit} bytes")
+            digest = hashlib.sha256()
+            with archive.open(info) as member:
+                for chunk in iter(lambda: member.read(1 << 20), b""):
+                    digest.update(chunk)
+            files.append((info.filename, digest.hexdigest()))
+    summary = "".join(f"{digest}  {name}\n" for name, digest in sorted(files))
     return "h1:" + base64.b64encode(hashlib.sha256(summary.encode()).digest()).decode()
 
 
@@ -480,7 +503,8 @@ def fetch_value(kind, base, item):
         return value
     if kind == "gomod":
         module, _, version = item.rpartition("@")
-        _, body = get(f"{base}/{go_escape(module)}/@v/{go_escape(version)}.zip")  # the whole zip: its files are hashed
+        _, body = get(f"{base}/{go_escape(module)}/@v/{go_escape(version)}.zip",  # the whole zip: its files are hashed
+                      limit=GO_ZIP_LIMIT)
         return go_module_hash(body)
     if kind == "rubygems":
         name, _, version = item.rpartition("@")
