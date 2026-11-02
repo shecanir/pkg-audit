@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Offline tests: no network. Run: python3 tests/test_pkg_audit.py"""
 import importlib.util
+import io
 import json
 import sys
 import tempfile
 import threading
 import time
 import unittest
+import zipfile
 from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("pkg_audit", Path(__file__).resolve().parent.parent / "pkg_audit.py")
@@ -61,6 +63,24 @@ class Values(unittest.TestCase):
             pa.fetch_value("maven", "https://m", "junit:junit:4.13.2")
         pa.get = lambda url, accept="*/*": ("text/plain", b"8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\n")
         self.assertEqual(pa.fetch_value("maven", "https://m", "junit:junit:4.13.2"), "8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12")
+
+    def test_go_module_hash(self):
+        def archive(files, level):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w", level) as zipped:
+                for name, content in files:
+                    zipped.writestr(name, content)
+            return buffer.getvalue()
+        files = [("example.com/m@v1.0.0/go.mod", "module example.com/m\n"), ("example.com/m@v1.0.0/a.go", "package m\n")]
+        calls = []
+
+        def fake_get(url, accept="*/*"):
+            calls.append(url)
+            return "application/zip", archive(files[::-1], zipfile.ZIP_DEFLATED)  # other order and packing, same files
+        pa.get = fake_get
+        self.assertEqual(pa.fetch_value("gomod", "https://m", "github.com/Foo/bar@v1.0.0-RC1"), pa.go_module_hash(archive(files, zipfile.ZIP_STORED)))
+        self.assertEqual(calls, ["https://m/github.com/!foo/bar/@v/v1.0.0-!r!c1.zip"])
+        self.assertEqual(pa.go_module_hash(archive(files, zipfile.ZIP_STORED)), "h1:SXy42eQ/QbleX7vtuAPFnaM3tNuQnfeo7rulG/p7iOw=")
 
     def test_missing_version_is_an_error(self):
         pa.get = lambda url, accept="*/*": ("", b'{"vers":"1.0.0","cksum":"c1"}\n')

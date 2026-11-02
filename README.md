@@ -22,11 +22,12 @@ network.
 | Cargo | `cksum` in the sparse index |
 | Maven | `.jar.sha1` |
 | RubyGems | `checksum` in the compact index |
+| Go modules | the `h1:` hash (as in `go.sum`) of a pinned version, computed from the module zip |
 | Node.js, Go, Gradle, Helm, kubectl, HashiCorp | the checksum file of a pinned release |
 
 Packages are pinned to a version, so metadata is immutable and any difference is a `mismatch`.
-Files themselves are not downloaded: equal hashes mean equal content, and a client verifies the
-file against that hash.
+Files themselves are not downloaded (except Go module zips, which are hashed here): equal hashes
+mean equal content, and a client verifies the file against that hash.
 
 ## Use
 
@@ -119,7 +120,7 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 
 - ایمیج‌های Docker، هش npm، فایل‌های PyPI، `cksum` در Cargo، `sha1` در Maven، checksum در RubyGems و
   فایل checksum نصب‌کننده‌ها (Node.js، Go، Gradle، Helm، kubectl، HashiCorp) بررسی می‌شوند.
-- بسته‌ها روی نسخه‌ی ثابت سنجیده می‌شوند، پس هر تفاوتی `mismatch` است. فایل‌ها دانلود نمی‌شوند.
+- بسته‌ها روی نسخه‌ی ثابت سنجیده می‌شوند، پس هر تفاوتی `mismatch` است. فایل‌ها دانلود نمی‌شوند، جز ZIP ماژول‌های Go که برای محاسبه‌ی هش دانلود می‌شود.
 - سبز یعنی بازرس جواب درست گرفته، نه اینکه همه‌ی کاربران همیشه همین را می‌گیرند. حمله‌ی مخصوص بعضی
   نشانی‌ها یا زمان قطعی اینترنت دیده نمی‌شود.
 - برای پروژه‌های حساس هش را خودتان ثابت کنید (lockfile با هش، `--require-hashes`، `image@sha256:…`).
