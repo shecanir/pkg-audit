@@ -359,6 +359,10 @@ OFFICIAL = {
     "archlinux": "https://geo.mirror.pkgbuild.com",
     "kali": "https://kali.download/kali",
     "opensuse": "https://download.opensuse.org",
+    "chromedriver": "https://chromedriver.storage.googleapis.com",
+    "chrome": "https://storage.googleapis.com/chrome-for-testing-public",
+    "python": "https://www.python.org/ftp/python",
+    "playwright": "https://cdn.playwright.dev/builds",
 }
 TITLES = {
     "npm": ("npm", "هش integrity نسخه‌های ثابت بسته‌ها در برابر registry.npmjs.org"),
@@ -383,6 +387,10 @@ TITLES = {
     "archlinux": ("Arch Linux", "sha256 چند بستهٔ ثابت در برابر geo.mirror.pkgbuild.com"),
     "kali": ("Kali Linux", "sha256 بسته‌های .deb ثابت در برابر kali.download"),
     "opensuse": ("openSUSE", "sha256 کلید GPG ثابت یک نسخهٔ Leap در برابر download.opensuse.org"),
+    "chromedriver": ("ChromeDriver (قدیمی)", "sha256 فایل نسخهٔ ثابت chromedriver پیش از ۱۱۵ در برابر chromedriver.storage.googleapis.com"),
+    "chrome": ("Chrome for Testing", "sha256 فایل chromedriver یک نسخهٔ ثابت در برابر storage.googleapis.com/chrome-for-testing-public"),
+    "python": ("Python", "sha256 فایل امضای هر نسخه در برابر python.org/ftp/python"),
+    "playwright": ("Playwright", "sha256 یک فایل ثابت مرورگرهای Playwright در برابر cdn.playwright.dev"),
 }
 
 
