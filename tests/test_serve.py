@@ -26,6 +26,32 @@ def report(checked_at):
     return {"groups": [{"id": "npm", "mirrors": {"m.example": {"checked_at": checked_at}}}]}
 
 
+class TestSchedule(unittest.TestCase):
+    def test_next_boundary(self):
+        self.assertEqual(serve.seconds_to_next(5, 600.0), 301)      # exactly on a boundary: wait a full step
+        self.assertEqual(serve.seconds_to_next(5, 601.0), 300)
+        self.assertEqual(serve.seconds_to_next(5, 899.5), 1.5 + 0)  # 0.5 s before the boundary plus 1 s
+
+    def test_failing_run_does_not_stop_the_loop(self):
+        calls = []
+        orig_run, orig_sleep = serve.subprocess.run, serve.time.sleep
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if len(calls) == 1:
+                raise OSError("boom")
+            if len(calls) == 3:
+                raise KeyboardInterrupt
+            return type("R", (), {"returncode": 0})()
+        serve.subprocess.run, serve.time.sleep = fake_run, lambda s: None
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                serve.run_forever(5, ["x"], 10)
+        finally:
+            serve.subprocess.run, serve.time.sleep = orig_run, orig_sleep
+        self.assertEqual(len(calls), 3)
+
+
 class Decide(unittest.TestCase):
     def test_unknown_group_or_mirror_is_refused(self):
         self.assertEqual(serve.decide(report(iso(99)), {}, "npm", "other", NOW, 30)[0], 404)

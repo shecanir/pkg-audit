@@ -106,17 +106,81 @@ class Pinned(http.client.HTTPSConnection):
         self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
 
 
+# Mirrors that do not answer from outside Iran can be asked through a tunnel to a server inside it:
+# AUDIT_SOCKS=host:port of a local SOCKS5 proxy (an `ssh -N -D` to the Iranian server). Which mirrors
+# use it is marked with `via=tunnel` in their line of the mirrors/targets file (no secret there);
+# how the tunnel connects is not this program's business and is never read or printed by it. The
+# official sources are always asked directly. Without AUDIT_SOCKS a marked mirror is asked directly.
+VIA_TUNNEL = set()
+
+
+def tunnel_address():
+    value = os.environ.get("AUDIT_SOCKS", "").strip()
+    host, _, port = value.rpartition(":")
+    return (host, int(port)) if host and port.isdigit() else None
+
+
+def via_tunnel(url):
+    return tunnel_address() is not None and any(url.rstrip("/").startswith(base) for base in VIA_TUNNEL)
+
+
+def _recv_exact(sock, n):
+    data = b""
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            raise RuntimeError("tunnel closed the connection")
+        data += chunk
+    return data
+
+
+def socks_connect(proxy, host, port, timeout):
+    """TCP connection to host:port through a SOCKS5 proxy (no authentication; the name is resolved by
+    the proxy, so a mirror is looked up from where the tunnel ends)."""
+    sock = socket.create_connection(proxy, timeout)
+    try:
+        sock.sendall(b"\x05\x01\x00")
+        if _recv_exact(sock, 2) != b"\x05\x00":
+            raise RuntimeError("tunnel proxy wants authentication")
+        name = host.encode("idna")
+        sock.sendall(b"\x05\x01\x00\x03" + bytes([len(name)]) + name + port.to_bytes(2, "big"))
+        head = _recv_exact(sock, 4)
+        if head[1] != 0:
+            raise RuntimeError(f"tunnel could not reach {host} (SOCKS code {head[1]})")
+        _recv_exact(sock, {1: 4, 4: 16}.get(head[3]) or _recv_exact(sock, 1)[0])
+        _recv_exact(sock, 2)
+        return sock
+    except BaseException:
+        sock.close()
+        raise
+
+
+class TunnelHTTPS(http.client.HTTPSConnection):
+    """HTTPS through the tunnel; SNI and certificate check stay on the host name."""
+
+    def connect(self):
+        sock = socks_connect(tunnel_address(), self.host, self.port, self.timeout)
+        self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+
+
+class TunnelHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(TunnelHTTPS, req)
+
+
 class Registry:
     """Anonymous pull access to one registry, following its Bearer challenge."""
 
     def __init__(self, base, ip=None):
         parts = urllib.parse.urlsplit(base)
         self.host, self.port, self.ip = parts.hostname, parts.port or 443, ip
+        self.tunnel = via_tunnel(base)
         self.tokens = {}
 
     def request(self, method, path, repo, hops=0):
         for attempt in range(2):
-            conn = (Pinned(self.host, self.ip, port=self.port, timeout=30) if self.ip
+            conn = (TunnelHTTPS(self.host, self.port, timeout=30) if self.tunnel
+                    else Pinned(self.host, self.ip, port=self.port, timeout=30) if self.ip
                     else http.client.HTTPSConnection(self.host, self.port, timeout=30))
             headers = {"Accept": ACCEPT, "User-Agent": "pkg-audit/1"}
             if repo in self.tokens:
@@ -136,7 +200,8 @@ class Registry:
                         return self.request(method, target.path + ("?" + target.query if target.query else ""),
                                             repo, hops + 1)
                     follow = urllib.request.Request(target.geturl(), method=method, headers={"Accept": ACCEPT})
-                    with urllib.request.urlopen(follow, timeout=30) as final:
+                    opener = urllib.request.build_opener(TunnelHandler) if self.tunnel else urllib.request.build_opener()
+                    with opener.open(follow, timeout=30) as final:
                         return final.status, final, final.read()
                 return resp.status, resp, body
             finally:
@@ -173,8 +238,15 @@ def split(ref):
 
 
 def read_list(path):
-    return [line.split("#", 1)[0].split() for line in Path(path).read_text().splitlines()
+    """Fields of every non-empty line. A `via=tunnel` field is taken out and the mirror address on
+    that line (the field starting with http) is remembered as one to ask through the tunnel."""
+    rows = [line.split("#", 1)[0].split() for line in Path(path).read_text().splitlines()
             if line.split("#", 1)[0].strip()]
+    for fields in rows:
+        if "via=tunnel" in fields:
+            fields.remove("via=tunnel")
+            VIA_TUNNEL.update(f.rstrip("/") for f in fields if f.startswith("http"))
+    return rows
 
 
 def check_rows(items, rows, check):
@@ -276,6 +348,17 @@ OFFICIAL = {
     "helm": "https://get.helm.sh",
     "k8s": "https://dl.k8s.io/release",
     "hashicorp": "https://releases.hashicorp.com",
+    "debian": "https://deb.debian.org/debian",
+    "ubuntu": "https://archive.ubuntu.com/ubuntu",
+    "almalinux": "https://repo.almalinux.org/almalinux",
+    "rocky": "https://dl.rockylinux.org/pub/rocky",
+    "epel": "https://dl.fedoraproject.org/pub/epel",
+    "fedora": "https://dl.fedoraproject.org/pub/fedora/linux",
+    "centos": "https://mirror.stream.centos.org",
+    "alpine": "https://dl-cdn.alpinelinux.org/alpine",
+    "archlinux": "https://geo.mirror.pkgbuild.com",
+    "kali": "https://kali.download/kali",
+    "opensuse": "https://download.opensuse.org",
 }
 TITLES = {
     "npm": ("npm", "هش integrity نسخه‌های ثابت بسته‌ها در برابر registry.npmjs.org"),
@@ -289,6 +372,17 @@ TITLES = {
     "helm": ("Helm", "فایل sha256 باینری Helm در برابر get.helm.sh"),
     "k8s": ("kubectl", "فایل sha256 باینری kubectl در برابر dl.k8s.io"),
     "hashicorp": ("HashiCorp", "فایل SHA256SUMS هر نسخه در برابر releases.hashicorp.com"),
+    "debian": ("Debian", "sha256 چند بستهٔ .deb ثابت در برابر deb.debian.org"),
+    "ubuntu": ("Ubuntu", "sha256 چند بستهٔ .deb ثابت در برابر archive.ubuntu.com"),
+    "almalinux": ("AlmaLinux", "sha256 کلیدهای GPG ثابت در برابر repo.almalinux.org"),
+    "rocky": ("Rocky Linux", "sha256 کلیدهای GPG ثابت در برابر dl.rockylinux.org"),
+    "epel": ("EPEL", "sha256 کلیدهای GPG ثابت در برابر dl.fedoraproject.org/pub/epel"),
+    "fedora": ("Fedora", "sha256 فایل‌های ثابت یک نسخهٔ منتشرشده در برابر dl.fedoraproject.org"),
+    "centos": ("CentOS Stream", "sha256 فایل‌های ثابت درخت نصب در برابر mirror.stream.centos.org"),
+    "alpine": ("Alpine", "sha256 فایل‌های ثابت منتشرشدهٔ minirootfs در برابر dl-cdn.alpinelinux.org"),
+    "archlinux": ("Arch Linux", "sha256 چند بستهٔ ثابت در برابر geo.mirror.pkgbuild.com"),
+    "kali": ("Kali Linux", "sha256 بسته‌های .deb ثابت در برابر kali.download"),
+    "opensuse": ("openSUSE", "sha256 کلید GPG ثابت یک نسخهٔ Leap در برابر download.opensuse.org"),
 }
 
 
@@ -296,9 +390,10 @@ def get(url, accept="*/*", tries=3):
     """GET with a few retries: a mirror or the official source resetting one connection is not a verdict."""
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "pkg-audit/1"})
     last = None
+    opener = urllib.request.build_opener(TunnelHandler) if via_tunnel(url) else urllib.request.build_opener()
     for attempt in range(tries):
         try:
-            with urllib.request.urlopen(req, timeout=45) as resp:
+            with opener.open(req, timeout=45) as resp:
                 return resp.headers.get("Content-Type", ""), resp.read()
         except urllib.error.HTTPError as exc:
             if exc.code < 500 and exc.code != 429:
@@ -645,7 +740,82 @@ details.m summary{grid-template-columns:minmax(0,1fr) auto 18px;padding:12px 14p
 .strip{grid-column:1/-1;order:5}
 .items{padding:2px 14px 10px}
 }
+
+/* --- modern layer --- */
+:root{--r:20px;--shadow:0 1px 2px rgba(14,34,24,.04),0 8px 28px -12px rgba(14,34,24,.14);--glow:#157a4a14}
+@media(prefers-color-scheme:dark){:root{--shadow:0 1px 0 rgba(255,255,255,.03) inset,0 10px 30px -14px rgba(0,0,0,.6);--glow:#6fd69a12}}
+body{background:radial-gradient(1100px 420px at 85% -80px,var(--glow),transparent 70%),var(--bg);min-height:100vh}
+.wrap{max-width:1040px}
+header{padding-top:22px}header img{box-shadow:var(--shadow)}
+h1{font-size:clamp(30px,6vw,52px);letter-spacing:-.025em;margin:26px 0 10px}
+h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:16px}
+.verdict{border-radius:var(--r);padding:18px 22px;box-shadow:var(--shadow);border:1px solid color-mix(in srgb,currentColor 18%,transparent)}
+.verdict b{font-size:24px;letter-spacing:-.01em}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0 8px}
+.nums span{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;box-shadow:var(--shadow);font-size:12.5px;line-height:1.5}
+.nums b:first-child{display:block;font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.search{position:relative;margin:18px 0 4px}
+.search input{width:100%;font:500 15px var(--font);color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:999px;
+padding:13px 48px 13px 20px;box-shadow:var(--shadow);outline:none;transition:border-color .15s,box-shadow .15s}
+.search input::placeholder{color:var(--muted)}
+.search input:focus{border-color:var(--primary);box-shadow:0 0 0 4px color-mix(in srgb,var(--primary) 18%,transparent)}
+.search svg{position:absolute;inset-inline-start:auto;right:18px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted);pointer-events:none}
+.search kbd{position:absolute;left:16px;top:50%;transform:translateY(-50%);font:600 11.5px ui-monospace,Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
+.search input:not(:placeholder-shown)~kbd{display:none}
+#sres{color:var(--muted);font-size:13px;min-height:22px;margin:8px 4px 0}
+nav.tabs{padding:12px 0}
+nav.tabs a{padding:5px 16px;transition:all .15s;box-shadow:var(--shadow)}
+nav.tabs a:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
+nav.tabs a.off{opacity:.35}
+h2.gt{font-size:23px;letter-spacing:-.015em;margin-top:38px}
+.list{border-radius:var(--r);box-shadow:var(--shadow)}
+details.m{transition:background .15s}details.m summary{padding:15px 20px}
+details.m[open]{background:color-mix(in srgb,var(--glow) 100%,transparent)}
+details.m[open] summary{border-bottom:0}
+details.m summary:hover{background:var(--glow)}
+.who .host{font-size:13.5px;font-weight:600}
+.score{font-size:19px}
+.sq{width:12px;height:12px;border-radius:50%;box-shadow:0 0 0 2px var(--card)}
+.b{padding:2px 11px}
+.items li:hover{background:var(--glow)}
+.items li{padding:8px 6px;border-radius:8px}
+.hide{display:none!important}
+.re{transition:all .15s}.re:hover:not(:disabled){background:var(--primary);color:#fff}
+section.note{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:8px 26px 20px;box-shadow:var(--shadow)}
+footer{margin-top:10px}
+@media(max-width:680px){.nums{grid-template-columns:repeat(2,1fr)}.search input{font-size:14px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 """
+
+SEARCH = r'''<script>
+(function(){var q=document.getElementById('q'),res=document.getElementById('sres');if(!q)return;
+var groups=[].map.call(document.querySelectorAll('h2.gt'),function(h){
+  var note=h.nextElementSibling,list=note.nextElementSibling;
+  return{h:h,note:note,list:list,rows:[].slice.call(list.querySelectorAll('details.m')),tab:document.querySelector('nav.tabs a[href="#'+h.id+'"]')}});
+var opened=new WeakMap();
+function norm(t){return t.toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک')}
+function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),hits=0,hosts=0;
+  groups.forEach(function(g){var gtext=norm(g.h.textContent),shown=0;
+    g.rows.forEach(function(d){
+      var hay=norm(d.textContent)+' '+gtext,ok=words.every(function(w){return hay.indexOf(w)>-1});
+      d.classList.toggle('hide',!ok);
+      if(ok){shown++;
+        if(words.length){if(!opened.has(d))opened.set(d,d.open);d.open=true;
+          d.querySelectorAll('.items li').forEach(function(li){li.classList.toggle('hide',!words.every(function(w){return norm(li.textContent+' '+d.querySelector('.host').textContent).indexOf(w)>-1}) && !words.every(function(w){return norm(d.querySelector('.host').textContent+' '+gtext).indexOf(w)>-1}))})}
+        else{if(opened.has(d)){d.open=opened.get(d);opened.delete(d)}d.querySelectorAll('.items li').forEach(function(li){li.classList.remove('hide')})}}
+    });
+    var on=shown>0||!words.length;
+    [g.h,g.note,g.list].forEach(function(e){e.classList.toggle('hide',!on)});
+    if(g.tab)g.tab.classList.toggle('off',!on);
+    hits+=shown;});
+  res.textContent=words.length?(hits?hits.toLocaleString('fa-IR')+' میرور پیدا شد':'چیزی پیدا نشد؛ نام میزبان، اکوسیستم یا بسته را امتحان کنید'):''}
+q.addEventListener('input',run);
+document.addEventListener('keydown',function(e){
+  if(e.key==='/'&&document.activeElement!==q&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();q.focus()}
+  else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}});
+})();
+</script>'''
 
 
 STALE_AFTER = 3 * 3600   # a result older than this is shown as old
@@ -825,6 +995,9 @@ def page(report):
 <div class="nums"><span><b>{fa(len(seen))}</b> میزبان</span><span><b>{fa(len(groups))}</b> اکوسیستم</span>
 <span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
 <span><b>{fa(counts["error"])}</b> بدون پاسخ</span></div>
+<div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input id="q" type="search" placeholder="جست‌وجوی میزبان، اکوسیستم یا بسته… (مثلاً liara، npm، lodash)" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
+<div id="sres" role="status" aria-live="polite"></div>
 <nav class="tabs">{nav}</nav>
 {sections}
 <div class="legend">{legend}</div>
@@ -846,7 +1019,7 @@ def page(report):
 <bdi dir="ltr">alpine:3.20@sha256:…</bdi>. آن‌وقت هیچ میرور نمی‌تواند محتوای دیگری بدهد. خروجی کامل:
 <a href="/report.json" dir="ltr">report.json</a>.</p></section>
 <footer>{BRAND["footer_html"]}</footer>
-</div>{script}</body></html>"""
+</div>{SEARCH}{script}</body></html>"""
 
 
 def write_atomic(path, text):
@@ -859,7 +1032,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("images", help="file with one name:tag per line")
     ap.add_argument("mirrors", help="file with `name https://host [ip]` per line (Docker registries)")
-    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp)")
+    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux, kali, opensuse)")
     ap.add_argument("--targets", help="file with `kind name base-url` per line: the mirrors to check for those kinds")
     ap.add_argument("--brand", help="JSON file overriding the page branding (keys of DEFAULT_BRAND)")
     ap.add_argument("--max-seconds", type=int, default=1200,
@@ -911,6 +1084,10 @@ def main():
     run_jobs(mirror_jobs, args.workers)
     report = {"generated": now_iso(), "groups": [g for g, _, _ in plans if g["items"]]}
     settle(report, active)
+    for g in report["groups"]:  # say in the report which mirrors were asked from inside Iran
+        for m in g["mirrors"].values():
+            if via_tunnel(m["url"]):
+                m["via"] = "tunnel"
     if args.queue:
         queue_remove(args.queue, [f"{gid}/{name}" for gid, name in asked])
         waiting = queue_read(args.queue)

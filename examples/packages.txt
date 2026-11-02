@@ -47,3 +47,6 @@ k8s v1.31.1/bin/linux/amd64/kubectl.sha256
 k8s v1.30.5/bin/linux/amd64/kubectl.sha256
 hashicorp terraform/1.9.8/terraform_1.9.8_SHA256SUMS
 hashicorp terraform/1.10.0/terraform_1.10.0_SHA256SUMS
+# debian/ubuntu: path of a small, immutable .deb under the mirror base
+debian pool/main/h/hello/hello_2.10-3_amd64.deb
+ubuntu pool/main/h/hello/hello_2.10-3build2_amd64.deb

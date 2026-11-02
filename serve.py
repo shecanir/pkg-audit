@@ -2,6 +2,13 @@
 """Serve the report page and take re-check requests from visitors.
 
   python3 serve.py --site site --queue queue.json --cooldown 30 --port 8080
+  python3 serve.py --site site --queue queue.json --run-every 5 -- images.txt mirrors.txt --json site/report.json ...
+
+With --run-every N the server also runs the auditor itself every N minutes (on the clock: :00, :05,
+...), the arguments after `--` being those of pkg_audit.py. No cron, systemd timer or CI schedule is
+needed: one run at a time, killed after --run-timeout seconds, a failed run only logs and the next
+one tries again. The files the auditor reads are read again on every run, so changing them needs no
+restart.
 
 Static files come from --site (the folder pkg_audit.py writes index.html and report.json to).
 One API call, POST /api/recheck with {"group": "npm", "mirror": "mirror.example.com"}, puts that
@@ -18,6 +25,7 @@ Standard library only.
 """
 import argparse
 import json
+import subprocess
 import sys
 import threading
 import time
@@ -56,6 +64,30 @@ def decide(report, queue, group, mirror, now, cooldown_minutes):
         if left > 0:
             return 429, {"status": "cooldown", "retry_after": int(left) + 1}
     return 202, {"status": "queued", "add": True}
+
+
+def seconds_to_next(every_minutes, now):
+    """Seconds from `now` (epoch seconds) to the next multiple of `every_minutes` on the clock, plus
+    a second so the run never starts before the boundary its slot is computed from."""
+    step = every_minutes * 60
+    return step - now % step + 1
+
+
+def run_forever(every_minutes, cmd, timeout, first_now=True):
+    """Run `cmd` at once and then on every clock boundary; one run at a time. Never raises."""
+    first = first_now
+    while True:
+        if not first:
+            time.sleep(seconds_to_next(every_minutes, time.time()))
+        first = False
+        started = time.monotonic()
+        try:
+            done = subprocess.run(cmd, timeout=timeout, stdin=subprocess.DEVNULL)
+            print(f"audit run finished with {done.returncode} in {time.monotonic() - started:.0f}s", flush=True)
+        except subprocess.TimeoutExpired:
+            print(f"audit run killed after {timeout}s", flush=True)
+        except Exception as exc:  # a broken run must not stop the schedule
+            print(f"audit run failed: {exc!r}", flush=True)
 
 
 class Limiter:
@@ -144,7 +176,17 @@ def main():
     ap.add_argument("--cooldown", type=int, default=30, help="minutes before a mirror can be re-checked (default %(default)s)")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--run-every", type=int, default=0, metavar="MINUTES",
+                    help="run pkg_audit.py (arguments after `--`) every N minutes on the clock; 0 = never (default)")
+    ap.add_argument("--run-timeout", type=int, default=1500, help="kill a run after this many seconds (default %(default)s)")
+    ap.add_argument("audit_args", nargs=argparse.REMAINDER, help="`--` then the arguments of pkg_audit.py")
     args = ap.parse_args()
+    if args.run_every:
+        rest = args.audit_args[1:] if args.audit_args[:1] == ["--"] else args.audit_args
+        if not rest:
+            ap.error("--run-every needs the pkg_audit.py arguments after `--`")
+        cmd = [sys.executable, str(Path(__file__).resolve().parent / "pkg_audit.py"), *rest]
+        threading.Thread(target=run_forever, args=(args.run_every, cmd, args.run_timeout), daemon=True).start()
     site = Path(args.site).resolve()
     handler = make_handler(site, args.queue, args.cooldown, Limiter(RATE_PER_MINUTE))
     ThreadingHTTPServer((args.host, args.port), handler).serve_forever()
