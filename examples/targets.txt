@@ -24,3 +24,6 @@ pypi  mirror-pypi.runflare.com https://mirror-pypi.runflare.com
 maven maven.myket.ir           https://maven.myket.ir
 debian mymirror  https://mirror.example.com/debian
 ubuntu mymirror  https://mirror.example.com/ubuntu
+alpine repo.hmirror.ir         https://repo.hmirror.ir/apk
+debian repo.hmirror.ir         https://repo.hmirror.ir/debian
+ubuntu repo.hmirror.ir         https://repo.hmirror.ir/ubuntu

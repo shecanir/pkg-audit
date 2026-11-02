@@ -50,3 +50,6 @@ hashicorp terraform/1.10.0/terraform_1.10.0_SHA256SUMS
 # debian/ubuntu: path of a small, immutable .deb under the mirror base
 debian pool/main/h/hello/hello_2.10-3_amd64.deb
 ubuntu pool/main/h/hello/hello_2.10-3build2_amd64.deb
+# alpine: path of a small, immutable file under the mirror base; a package of an end-of-life branch
+# is never replaced (and package-only mirrors such as repo.hmirror.ir/apk have no releases/ tree)
+alpine v3.16/main/x86_64/alpine-keys-2.4-r1.apk
