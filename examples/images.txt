@@ -1,5 +1,6 @@
 # Images whose official digests are published signed (scripts/image-digests.py fetch).
-# One name:tag per line; official images without library/.
+# One name:tag per line; official images without library/. An image on another registry starts with
+# its host name, and is compared on the mirrors of that registry (docker-mirrors.txt).
 alpine:3.20
 alpine:3.22
 debian:12
@@ -12,3 +13,7 @@ nginx:stable
 postgres:16
 redis:7
 curlimages/curl:8.10.1
+mcr.microsoft.com/dotnet/aspnet:9.0
+gcr.io/distroless/static-debian12:nonroot
+quay.io/prometheus/prometheus:v2.55.0
+docker.elastic.co/elasticsearch/elasticsearch:8.15.0

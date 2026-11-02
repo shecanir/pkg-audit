@@ -1,4 +1,6 @@
-# Docker registry mirrors: name URL [pinned-ip]
+# Docker registry mirrors: name URL [registry] [pinned-ip]
+# registry is the official registry the mirror stands for (default Docker Hub): it is compared with
+# that registry, on the images of images.txt that are on it.
 # A pinned ip sends the TLS connection to that address (host name still used for SNI and the
 # certificate), to probe one PoP or proxy of a mirror instead of what DNS answers.
 mymirror   https://mirror-docker.example.com
@@ -14,3 +16,7 @@ hub.mecan.ir          https://hub.mecan.ir
 docker-mirror.liara.ir https://docker-mirror.liara.ir
 docker.chabokan.net   https://docker.chabokan.net
 docker.novin.cloud    https://docker.novin.cloud
+mcr.hamdocker.ir      https://mcr.hamdocker.ir      mcr.microsoft.com
+gcr.hamdocker.ir      https://gcr.hamdocker.ir      gcr.io
+quay.hamdocker.ir     https://quay.hamdocker.ir     quay.io
+elastic.hamdocker.ir  https://elastic.hamdocker.ir  docker.elastic.co

@@ -16,7 +16,7 @@ network.
 
 | Ecosystem | Value compared with the official source |
 | --- | --- |
-| Docker | digest of each tag (and that the manifest hashes to it); a different digest Docker Hub still serves is `stale`, any other is `mismatch` |
+| Docker | digest of each tag (and that the manifest hashes to it), from Docker Hub or the registry the image name starts with; a different digest that registry still serves is `stale`, any other is `mismatch` |
 | npm | `dist.integrity` of a pinned version |
 | PyPI | sha256 of every file of a pinned version (JSON or HTML index) |
 | Cargo | `cksum` in the sparse index |

@@ -23,8 +23,19 @@ class Paths(unittest.TestCase):
         self.assertEqual(pa.cargo_path("serde"), "se/rd/serde")
 
     def test_split(self):
-        self.assertEqual(pa.split("alpine:3.20"), ("library/alpine", "3.20"))
-        self.assertEqual(pa.split("curlimages/curl:8"), ("curlimages/curl", "8"))
+        hub = "registry-1.docker.io"
+        self.assertEqual(pa.split("alpine:3.20"), (hub, "library/alpine", "3.20"))
+        self.assertEqual(pa.split("curlimages/curl:8"), (hub, "curlimages/curl", "8"))
+        self.assertEqual(pa.split("docker.io/alpine:3.20"), (hub, "library/alpine", "3.20"))
+        self.assertEqual(pa.split("mcr.microsoft.com/dotnet/aspnet:9.0"), ("mcr.microsoft.com", "dotnet/aspnet", "9.0"))
+        self.assertEqual(pa.split("localhost:5000/app:v1"), ("localhost:5000", "app", "v1"))
+
+    def test_parse_docker_mirrors(self):
+        self.assertEqual(
+            pa.parse_docker_mirrors([["a", "https://a"], ["b", "https://b", "mcr.microsoft.com"],
+                                     ["c", "https://c", "192.0.2.1"], ["d", "https://d", "quay.io", "192.0.2.2"]]),
+            [("a", "https://a", "registry-1.docker.io", None), ("b", "https://b", "mcr.microsoft.com", None),
+             ("c", "https://c", "registry-1.docker.io", "192.0.2.1"), ("d", "https://d", "quay.io", "192.0.2.2")])
 
 
 class Values(unittest.TestCase):
@@ -124,6 +135,59 @@ class Verdicts(unittest.TestCase):
         # and the page calls it "in the queue", not "no answer"
         report = {"generated": "2026-01-01T00:00:00Z", "groups": [g]}
         self.assertIn("در صف بررسی", pa.page(report))
+
+
+    def test_docker_mirrors_are_compared_with_their_own_registry(self):
+        digests = {"https://registry-1.docker.io": "sha256:" + "a" * 64, "https://mcr.microsoft.com": "sha256:" + "b" * 64,
+                   "https://hub.mirror": "sha256:" + "a" * 64, "https://mcr.mirror": "sha256:" + "c" * 64}
+
+        class Fake:
+            def __init__(self, base, ip=None):
+                self.base = base
+
+            def digest(self, repo, tag):
+                return digests[self.base]
+
+            def manifest_hashes_to(self, repo, digest):
+                return self.base != "https://mcr.microsoft.com" or digest == digests[self.base]
+
+        real, pa.Registry = pa.Registry, Fake
+        try:
+            refs = ["alpine:3.20", "mcr.microsoft.com/dotnet/aspnet:9.0"]
+            mirrors = [("hub", "https://hub.mirror", "registry-1.docker.io", None),
+                       ("mcr", "https://mcr.mirror", "mcr.microsoft.com", None)]
+            group, official, after = pa.docker_group(refs, mirrors, {"hub", "mcr"})
+            official[1]()
+            pa.run_jobs(after(), 1)
+        finally:
+            pa.Registry = real
+        self.assertEqual(group["mirrors"]["hub"]["items"], ["alpine:3.20"])
+        self.assertEqual(group["mirrors"]["mcr"]["items"], ["mcr.microsoft.com/dotnet/aspnet:9.0"])
+        self.assertEqual({r: v["verdict"] for r, v in group["mirrors"]["hub"]["rows"].items()}, {"alpine:3.20": "ok"})
+        self.assertEqual({r: v["verdict"] for r, v in group["mirrors"]["mcr"]["rows"].items()},
+                         {"mcr.microsoft.com/dotnet/aspnet:9.0": "mismatch"})
+
+    def test_an_official_registry_that_is_down_keeps_its_mirrors_last_result(self):
+        class Down:
+            def __init__(self, base, ip=None):
+                pass
+
+            def digest(self, repo, tag):
+                raise RuntimeError("HTTP 503")
+
+        old = {"url": "https://mcr.mirror", "ip": None, "checked_at": "2024-01-01T00:00:00Z",
+               "rows": {"mcr.microsoft.com/x/y:1": {"verdict": "ok", "value": "sha256:1", "detail": ""}}}
+        real, pa.Registry = pa.Registry, Down
+        try:
+            group, official, after = pa.docker_group(
+                ["mcr.microsoft.com/x/y:1"], [("mcr", "https://mcr.mirror", "mcr.microsoft.com", None)],
+                {"mcr"}, {"mirrors": {"mcr": old}})
+            official[1]()
+            self.assertEqual(after(), [])
+        finally:
+            pa.Registry = real
+        self.assertEqual(group["mirrors"]["mcr"]["rows"], old["rows"])
+        self.assertEqual(group["mirrors"]["mcr"]["checked_at"], old["checked_at"])
 
 
 class Turns(unittest.TestCase):
