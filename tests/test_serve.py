@@ -123,6 +123,16 @@ class Page(unittest.TestCase):
         # our own mirror gets no place of its own: it is sorted by its score like the others
         self.assertEqual(sorted(hosts, key=out.index), ["b.example", "c.example", "a.example", "d.example"])
 
+    def test_equal_scores_go_to_the_stronger_provider(self):
+        g = self.group()
+        row = {"verdict": "ok", "value": "v", "detail": ""}
+        g["items"] = ["x@1"]
+        g["mirrors"] = {h: {"url": "https://" + h, "ip": None, "checked_at": None, "queued": False, "rows": {"x@1": row}}
+                        for h in ("a.small.example", "b.big.example")}
+        out = pa.render_group(g, str, pscore={"small.example": 1.0, "big.example": 5.0})
+        self.assertLess(out.index("b.big.example"), out.index("a.small.example"))  # not by name
+        self.assertIn('data-p="5.000"', out)
+
     def test_404_is_shown_apart_from_no_answer(self):
         g = self.group()
         g["items"] = ["x@1", "y@1"]
