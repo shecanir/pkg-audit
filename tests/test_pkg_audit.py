@@ -556,7 +556,26 @@ class History(unittest.TestCase):
         report["groups"][0].update(title="npm", note="n", items=["a@1", "b@1"])
         out = pa.page(report)
         self.assertIn('data-q="m.example"', out)
-        self.assertIn("۵۰٪", out)
+        self.assertIn("۵۰٪ سالم", out)
+        self.assertIn('<b>۰٫۵</b>', out)  # one repository, half its items ok
+
+    def test_providers_rank_by_summed_score(self):
+        def mirror(url, verdicts):
+            return {"url": url, "rows": {i: {"verdict": v, "value": "h", "detail": ""} for i, v in zip(["a@1", "b@1"], verdicts)}}
+        g = {"id": "npm", "title": "npm", "note": "n", "items": ["a@1", "b@1"], "mirrors": {
+            "small": mirror("https://npm.small.example", ["ok", "ok"]),
+            "big1": mirror("https://npm.big.example", ["ok", "missing"]),
+            "big2": mirror("https://npm2.big.example", ["ok", "ok"]),
+            "bad1": mirror("https://npm.bad.example", ["ok", "mismatch"]),
+            "bad2": mirror("https://npm2.bad.example", ["ok", "ok"])}}
+        out = pa.providers([g], None, [], lambda n: str(n).translate(pa.FA_DIGITS))
+        # big: 1.5 from two repositories, beats small's 1; bad: the mismatching one scores 0
+        self.assertLess(out.index('data-q="big.example"'), out.index('data-q="small.example"'))
+        self.assertIn("<b>۱٫۵</b>", out)
+        # bad also scores 1 (only its clean repository counts); a tie goes to the higher share ok
+        self.assertLess(out.index('data-q="small.example"'), out.index('data-q="bad.example"'))
+        self.assertIn('data-score="1.500" data-pct="0.7500" data-repos="2"', out)  # what the sort buttons read
+        self.assertIn('data-vsort="score" aria-pressed="true"', out)
         self.assertNotIn('class="verdict', out)  # no banner without a mismatch
 
     def test_a_broken_file_is_kept_aside(self):
