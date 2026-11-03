@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Check that Docker registry mirrors serve what Docker Hub serves, for the images people pull.
+"""Check that Docker registry mirrors serve what the official registry serves, for the images people pull.
 
 A mirror that is compromised, or an insider, can answer `alpine:3.20` with a manifest that is not
 Docker Hub's. Docker would accept it (a pull by tag checks no publisher signature), so the only
 way to notice is to ask Docker Hub and the mirror the same question and compare. This does that
 for any number of mirrors, ours and other operators', and writes a JSON report and a static page.
+An image is on Docker Hub unless its name starts with another registry (`mcr.microsoft.com/...`);
+a mirror of such a registry is compared with that registry, for the images that are on it.
 
 For every image in the list and every mirror:
   official  digest of the tag on registry-1.docker.io (asked directly, never through a mirror)
@@ -20,9 +22,10 @@ For every image in the list and every mirror:
 Layers are not downloaded: a manifest names its config and layers by hash, so equal manifest
 digests mean equal content, and a client verifies every blob against the manifest it pulled.
 
-Mirror list, one per line: `name https://host [ip]`. With an ip the TLS connection goes to that
-address (SNI and certificate still for the host), to probe one PoP or one proxy of a mirror
-instead of whatever DNS answers.
+Mirror list, one per line: `name https://host [registry] [ip]`. The registry is the official one the
+mirror stands for (default Docker Hub). With an ip the TLS connection goes to that address (SNI and
+certificate still for the host), to probe one PoP or one proxy of a mirror instead of whatever DNS
+answers.
 
 Limits, stated so nobody reads more into a green page than it says: this detects a mirror that
 answers these questions wrongly. It cannot see one that answers the auditor correctly and other
@@ -36,6 +39,7 @@ import contextlib
 import hashlib
 import html
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -55,7 +59,7 @@ try:
 except ImportError:  # Windows: no locking (the re-check queue then needs one writer)
     fcntl = None
 
-HUB = "https://registry-1.docker.io"
+HUB_HOST = "registry-1.docker.io"
 ACCEPT = ", ".join([
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -232,9 +236,21 @@ class Registry:
         return "sha256:" + hashlib.sha256(body).hexdigest() == digest
 
 
+def registry_host(name):
+    return HUB_HOST if name.lower() in ("docker.io", "index.docker.io") else name.lower()
+
+
 def split(ref):
-    name, _, tag = ref.partition(":")
-    return ("library/" + name if "/" not in name else name), tag
+    """(registry, repository, tag). A first path part with a dot, a port or `localhost` names the
+    registry; any other image is on Docker Hub."""
+    name, _, tag = ref.rpartition(":")
+    first, _, rest = name.partition("/")
+    host, repo = HUB_HOST, name
+    if rest and ("." in first or ":" in first or first == "localhost"):
+        host, repo = registry_host(first), rest
+    if host == HUB_HOST and "/" not in repo:
+        repo = "library/" + repo
+    return host, repo, tag
 
 
 def read_list(path):
@@ -247,6 +263,31 @@ def read_list(path):
             fields.remove("via=tunnel")
             VIA_TUNNEL.update(f.rstrip("/") for f in fields if f.startswith("http"))
     return rows
+
+
+def parse_docker_mirrors(rows):
+    """`name URL [registry] [ip]` lines -> (name, URL, registry the mirror stands for, ip or None)."""
+    parsed = []
+    for name, url, *rest in rows:
+        upstream, ip = HUB_HOST, None
+        for field in rest:
+            try:
+                ipaddress.ip_address(field)
+                ip = field
+            except ValueError:
+                upstream = registry_host(field)
+        parsed.append((name, url, upstream, ip))
+    return parsed
+
+
+def mirrors_with_images(mirrors, on_registry):
+    """The (name, URL, registry, ip) mirrors whose registry has an image in the list. The others are
+    left out with a warning, so a misspelt registry does not make a mirror vanish without a word."""
+    for name, url, upstream, _ in mirrors:
+        if upstream not in on_registry:
+            print(f"docker mirror {name} ({url}) stands for {upstream}, which has no image in the image list; "
+                  "not checked", file=sys.stderr)
+    return [m for m in mirrors if m[2] in on_registry]
 
 
 def check_rows(items, rows, check):
@@ -286,26 +327,34 @@ def keep_or_new(prior, name, url, ip, active):
 
 
 def docker_group(refs, mirrors, active, prior_group=None):
-    """The group, the job that asks Docker Hub (None if no mirror of it is checked now) and a
-    function returning the mirror jobs once Docker Hub's answers are in."""
-    hub = Registry(HUB)
-    official, failed = {}, []
-    group = {"id": "docker", "title": "Docker", "items": list(refs), "mirrors": {},
-             "note": "digest هر تگ در برابر Docker Hub"}
+    """The group, the jobs that ask the official registries (one per registry with a mirror checked
+    now, so they are asked at the same time) and a function returning the mirror jobs once their
+    answers are in. `mirrors` are (name, URL, registry, ip); each is compared on the images that
+    are on its registry."""
+    official, failed = {}, {}
+    registries = {upstream: Registry(f"https://{upstream}") for _, _, upstream, _ in mirrors}
+    items = {upstream: [ref for ref in refs if split(ref)[0] == upstream] for upstream in registries}
+    group = {"id": "docker", "title": "Docker", "items": [ref for ref in refs if split(ref)[0] in registries],
+             "mirrors": {}, "note": "digest هر تگ در برابر رجیستری رسمی همان ایمیج"}
     prior = (prior_group or {}).get("mirrors", {})
+    wanted = sorted({upstream for name, _, upstream, _ in mirrors if name in active})
 
-    def ask_hub():
-        for ref in refs:
-            repo, tag = split(ref)
-            try:
-                official[ref] = hub.digest(repo, tag)
-            except Exception as exc:
-                failed.append(f"{ref}: Docker Hub did not answer ({exc})")
-                return
+    def ask_official(upstream):
+        def ask():
+            for ref in items[upstream]:
+                _, repo, tag = split(ref)
+                try:
+                    official[ref] = registries[upstream].digest(repo, tag)
+                except Exception as exc:
+                    failed[upstream] = f"{ref}: {upstream} did not answer ({exc})"
+                    return
+        return ask
 
-    def one_mirror(reg, rows):
+    def one_mirror(reg, upstream, rows):
+        label = "Docker Hub" if upstream == HUB_HOST else upstream
+
         def check(ref, row):
-            repo, tag = split(ref)
+            _, repo, tag = split(ref)
             row["value"] = reg.digest(repo, tag)
             if not reg.manifest_hashes_to(repo, row["value"]):
                 row.update(verdict="mismatch", detail="manifest bytes do not hash to its digest")
@@ -313,26 +362,34 @@ def docker_group(refs, mirrors, active, prior_group=None):
                 row["verdict"] = "ok"
             else:
                 try:
-                    known = hub.manifest_hashes_to(repo, row["value"])
+                    known = registries[upstream].manifest_hashes_to(repo, row["value"])
                 except RuntimeError:
                     known = False
                 if known:
-                    row.update(verdict="stale", detail="another digest Docker Hub serves for this repository")
+                    row.update(verdict="stale", detail=f"another digest {label} serves for this repository")
                 else:
-                    row.update(verdict="mismatch", detail="Docker Hub has no manifest with this digest")
-        return lambda: check_rows(refs, rows, check)
+                    row.update(verdict="mismatch", detail=f"{label} has no manifest with this digest")
+        return lambda: check_rows(items[upstream], rows, check)
 
     def after_official():
-        if failed:
-            sys.exit(failed[0] + "; nothing to compare against")
-        return [(urllib.parse.urlsplit(url).hostname,
-                 one_mirror(Registry(url, (ip or [None])[0]), group["mirrors"][name]["rows"]))
-                for name, url, *ip in mirrors if name in active]
+        for message in failed.values():  # nothing to compare against: those mirrors keep their last result
+            print(message + "; its mirrors are not checked in this run", file=sys.stderr)
+        jobs = []
+        for name, url, upstream, ip in mirrors:
+            if name not in active:
+                continue
+            if upstream in failed:
+                group["mirrors"][name] = dict(keep_or_new(prior.get(name), name, url, ip, False),
+                                              items=items[upstream])
+                continue
+            jobs.append((urllib.parse.urlsplit(url).hostname,
+                         one_mirror(Registry(url, ip), upstream, group["mirrors"][name]["rows"])))
+        return jobs
 
-    for name, url, *ip in mirrors:
-        group["mirrors"][name] = keep_or_new(prior.get(name), name, url, ip[0] if ip else None, name in active)
-    return group, (("registry-1.docker.io", ask_hub) if active else None), after_official
-
+    for name, url, upstream, ip in mirrors:
+        group["mirrors"][name] = dict(keep_or_new(prior.get(name), name, url, ip, name in active),
+                                      items=items[upstream])
+    return group, [(upstream, ask_official(upstream)) for upstream in wanted], after_official
 
 # Package ecosystems: the same question as for Docker, asked of metadata that is immutable for a
 # pinned version, so any difference from the official source is a mismatch (no `stale`).
@@ -470,7 +527,7 @@ def fetch_value(kind, base, item):
 
 
 def package_group(kind, items, targets, active, prior_group=None):
-    """Like docker_group, for one package ecosystem."""
+    """Like docker_group, for one package ecosystem (one official job, none if no mirror is due)."""
     official = {}
     title, note = TITLES[kind]
     group = {"id": kind, "title": title, "items": list(items), "mirrors": {}, "note": note}
@@ -500,7 +557,7 @@ def package_group(kind, items, targets, active, prior_group=None):
 
     for name, base in targets:
         group["mirrors"][name] = keep_or_new(prior.get(name), name, base, None, name in active)
-    return group, ((urllib.parse.urlsplit(OFFICIAL[kind]).hostname, ask_official) if active else None), after_official
+    return group, ([(urllib.parse.urlsplit(OFFICIAL[kind]).hostname, ask_official)] if active else []), after_official
 
 
 def run_jobs(jobs, workers):
@@ -877,7 +934,7 @@ document.addEventListener('click',function(e){
 
 
 def render_group(g, fa):
-    refs, mirrors = g["items"], g["mirrors"]
+    mirrors = g["mirrors"]
     summary = []
     for n, m in mirrors.items():
         rows = m["rows"]
@@ -891,6 +948,7 @@ def render_group(g, fa):
     for _, _, _, n, m, done, bad, answered, ours in summary:
         seen = checked_label(m.get("checked_at"))
         rows = m["rows"]
+        refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
         pct = round(100 * done / len(refs)) if refs else 0
         tone = "none" if not answered else "alert" if bad else "good" if done == len(refs) else "warn"
         host = html.escape(m["url"].split("://", 1)[-1])
@@ -1062,7 +1120,7 @@ def write_atomic(path, text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("images", help="file with one name:tag per line")
-    ap.add_argument("mirrors", help="file with `name https://host [ip]` per line (Docker registries)")
+    ap.add_argument("mirrors", help="file with `name https://host [registry] [ip]` per line (Docker registries)")
     ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux, kali, opensuse)")
     ap.add_argument("--targets", help="file with `kind name base-url` per line: the mirrors to check for those kinds")
     ap.add_argument("--brand", help="JSON file overriding the page branding (keys of DEFAULT_BRAND)")
@@ -1087,7 +1145,7 @@ def main():
     if args.brand:
         BRAND.update(json.loads(Path(args.brand).read_text()))
     refs = [line[0] for line in read_list(args.images)]
-    docker_mirrors = read_list(args.mirrors)
+    docker_mirrors = parse_docker_mirrors(read_list(args.mirrors))
     items, targets = {}, {}
     if args.packages and args.targets:
         for kind, item in read_list(args.packages):
@@ -1099,7 +1157,12 @@ def main():
     prior = load_state(args.state) if args.state else {}
     slots = max(1, args.slots)
     slot = args.slot if args.slot is not None else int(time.time() // (args.slot_minutes * 60)) % slots
-    specs = [("docker", refs, [(m[0], m[1]) for m in docker_mirrors])] + [(k, items[k], targets[k]) for k in kinds]
+    on_registry = {}
+    for ref in refs:
+        on_registry.setdefault(split(ref)[0], []).append(ref)
+    docker_mirrors = mirrors_with_images(docker_mirrors, on_registry)
+    specs = [("docker", images, [(m[0], m[1]) for m in docker_mirrors if m[2] == upstream])
+             for upstream, images in on_registry.items()] + [(k, items[k], targets[k]) for k in kinds]
     active = pick_active(specs, prior, slots, slot)
     asked = set()
     if args.queue:  # visitors' re-check requests
@@ -1109,7 +1172,7 @@ def main():
     plans = [docker_group(refs, docker_mirrors, names("docker"), prior.get("docker"))]
     plans += [package_group(k, items[k], targets[k], names(k), prior.get(k)) for k in kinds]
     # Phase 1: ask every official source that is needed now (different sources at the same time).
-    run_jobs([official for _, official, _ in plans if official], args.workers)
+    run_jobs([job for _, officials, _ in plans for job in officials], args.workers)
     # Phase 2: ask this run's mirrors; one request at a time per host, several hosts at once.
     mirror_jobs = [job for _, _, after in plans for job in after()]
     run_jobs(mirror_jobs, args.workers)

@@ -16,7 +16,7 @@ network.
 
 | Ecosystem | Value compared with the official source |
 | --- | --- |
-| Docker | digest of each tag (and that the manifest hashes to it); a different digest Docker Hub still serves is `stale`, any other is `mismatch` |
+| Docker | digest of each tag (and that the manifest hashes to it), from Docker Hub or the registry the image name starts with; a different digest that registry still serves is `stale`, any other is `mismatch` |
 | npm | `dist.integrity` of a pinned version |
 | PyPI | sha256 of every file of a pinned version (JSON or HTML index) |
 | Cargo | `cksum` in the sparse index |
@@ -119,6 +119,9 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 
 - ایمیج‌های Docker، هش npm، فایل‌های PyPI، `cksum` در Cargo، `sha1` در Maven، checksum در RubyGems و
   فایل checksum نصب‌کننده‌ها (Node.js، Go، Gradle، Helm، kubectl، HashiCorp) بررسی می‌شوند.
+- ایمیج Docker با رجیستری رسمی خودش مقایسه می‌شود: Docker Hub، یا رجیستری‌ای که نام ایمیج با آن شروع
+  می‌شود (`mcr.microsoft.com/...`، `gcr.io/...`، `quay.io/...`). میرور هر رجیستری در `docker-mirrors.txt`
+  با ستون سوم مشخص می‌شود و فقط روی ایمیج‌های همان رجیستری سنجیده می‌شود.
 - بسته‌ها روی نسخه‌ی ثابت سنجیده می‌شوند، پس هر تفاوتی `mismatch` است. فایل‌ها دانلود نمی‌شوند.
 - سبز یعنی بازرس جواب درست گرفته، نه اینکه همه‌ی کاربران همیشه همین را می‌گیرند. حمله‌ی مخصوص بعضی
   نشانی‌ها یا زمان قطعی اینترنت دیده نمی‌شود.
