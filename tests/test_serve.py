@@ -103,10 +103,23 @@ class Page(unittest.TestCase):
             "m.example": {"url": "https://m.example", "ip": None, "checked_at": checked, "queued": queued,
                           "rows": {"x@1": {"verdict": "ok", "value": "v", "detail": ""}}}}}
 
+    def test_best_score_first_then_by_name(self):
+        g = self.group()
+        row = lambda v: {"verdict": v, "value": "v", "detail": ""}
+        g["items"] = ["x@1", "y@1"]
+        for host, verdicts in [("c.example", ["ok", "ok"]), ("a.example", ["ok", "error"]),
+                               ("b.example", ["ok", "ok"]), ("d.example", ["mismatch", "ok"])]:
+            g["mirrors"][host] = {"url": "https://" + host, "ip": None, "checked_at": None, "queued": False,
+                                  "rows": dict(zip(g["items"], map(row, verdicts)))}
+        del g["mirrors"]["m.example"]
+        out = pa.render_group(g, str)
+        hosts = [h for h in ("a.example", "b.example", "c.example", "d.example")]
+        self.assertEqual(sorted(hosts, key=out.index), ["b.example", "c.example", "a.example", "d.example"])
+
     def test_button_only_when_rechecks_are_enabled(self):
         r = {"generated": "2026-01-01T10:05:00Z", "groups": [self.group()]}
         pa.BRAND["recheck_minutes"] = 0
-        self.assertNotIn("button", pa.page(r))
+        self.assertNotIn('class="re"', pa.page(r))
         pa.BRAND["recheck_minutes"] = 30
         try:
             out = pa.page(r)

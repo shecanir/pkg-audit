@@ -932,6 +932,9 @@ nav.tabs{padding:12px 0}
 nav.tabs a{padding:5px 16px;transition:all .15s;box-shadow:var(--shadow)}
 nav.tabs a:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
 nav.tabs a.off{opacity:.35}
+.sort{flex:none;display:inline-flex;margin-inline-start:auto;border:1px solid var(--line);border-radius:999px;background:var(--card);padding:2px;box-shadow:var(--shadow)}
+.sort button{font:600 12.5px var(--font);color:var(--muted);background:transparent;border:0;border-radius:999px;padding:3px 12px;cursor:pointer}
+.sort button[aria-pressed=true]{background:var(--primary);color:#fff}
 h2.gt{font-size:23px;letter-spacing:-.015em;margin-top:38px}
 .list{border-radius:var(--r);box-shadow:var(--shadow)}
 details.m{transition:background .15s}details.m summary{padding:15px 20px}
@@ -984,6 +987,14 @@ function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),h
     hits+=shown;});
   res.textContent=words.length?(hits?hits.toLocaleString('fa-IR')+' میرور پیدا شد':'چیزی پیدا نشد؛ نام میزبان، اکوسیستم یا بسته را امتحان کنید'):''}
 q.addEventListener('input',run);
+function order(by){
+  groups.forEach(function(g){g.rows.slice().sort(function(a,b){
+    if(by==='score'){var d=a.dataset.score-b.dataset.score||a.dataset.bad-b.dataset.bad;if(d)return d}
+    return a.dataset.name<b.dataset.name?-1:a.dataset.name>b.dataset.name?1:0}).forEach(function(d){g.list.appendChild(d)})});
+  [].forEach.call(document.querySelectorAll('.sort button'),function(b){b.setAttribute('aria-pressed',b.dataset.sort===by)});
+  try{localStorage.setItem('sort',by)}catch(e){}}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.sort button');if(b)order(b.dataset.sort)});
+try{if(localStorage.getItem('sort')==='name')order('name')}catch(e){}
 document.addEventListener('keydown',function(e){
   if(e.key==='/'&&document.activeElement!==q&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();q.focus()}
   else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}});
@@ -1040,16 +1051,19 @@ def render_group(g, fa):
         bad = sum(r["verdict"] == "mismatch" for r in rows.values())
         answered = sum(r["verdict"] != "error" for r in rows.values())
         ours = bool(BRAND["ours"]) and n == BRAND["ours"]
-        summary.append((not ours, -bad, -done, n, m, done, bad, answered, ours))
-    summary.sort(key=lambda t: t[:4])  # ours first, then problems, then best score
+        refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
+        share = done / len(refs) if refs else 0
+        host = m["url"].split("://", 1)[-1]
+        summary.append((-share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
+    summary.sort(key=lambda t: t[:4])  # best score first, then fewer problems, then by name
     out = ""
-    for _, _, _, n, m, done, bad, answered, ours in summary:
+    for share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
         seen = checked_label(m.get("checked_at"))
         rows = m["rows"]
-        refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
         pct = round(100 * done / len(refs)) if refs else 0
         tone = "none" if not answered else "alert" if bad else "good" if done == len(refs) else "warn"
         host = html.escape(m["url"].split("://", 1)[-1])
+        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"'
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if ours else ""
         strip = ""
         for ref in refs:
@@ -1068,7 +1082,7 @@ def render_group(g, fa):
             items += (f'<li><code>{html.escape(ref)}</code><span class="b {cls}" title="{tip}">'
                       f'<span aria-hidden="true">{icon}</span>{label}</span></li>')
         opened = " open" if bad else ""
-        out += (f'<details class="m"{opened}><summary><div class="who"><span class="host">{host}</span>{tag}<span class="when{" old" if seen[1] else ""}">{seen[0]}{" · در صف بررسی" if m.get("queued") and m.get("checked_at") else ""}</span></div>'
+        out += (f'<details class="m"{opened} {key}><summary><div class="who"><span class="host">{host}</span>{tag}<span class="when{" old" if seen[1] else ""}">{seen[0]}{" · در صف بررسی" if m.get("queued") and m.get("checked_at") else ""}</span></div>'
                 f'<div class="score {tone}">{fa(pct)}٪<small>{fa(done)} از {fa(len(refs))}</small></div>'
                 f'<div class="strip">{strip}</div></summary><ul class="items">{items}</ul></details>')
     return (f'<h2 class="gt" id="{g["id"]}">{html.escape(g["title"])}</h2>'
@@ -1139,6 +1153,9 @@ def page(report):
         verdict_body = (f'<details class="vd"{opened}><summary><b>{vtext}</b>'
                         f'<span class="vhint">جزئیات</span></summary><div class="vsub">{vsub}</div></details>')
     nav = "".join(f'<a href="#{g["id"]}">{html.escape(g["title"])}</a>' for g in groups)
+    nav += ('<span class="sort" role="group" aria-label="ترتیب">'
+            '<button type="button" data-sort="score" aria-pressed="true">بیشترین امتیاز</button>'
+            '<button type="button" data-sort="name" aria-pressed="false">الفبا</button></span>')
     sections = "".join(render_group(g, fa) for g in groups)
 
     src = BRAND["source_url"]
