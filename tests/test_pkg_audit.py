@@ -33,6 +33,40 @@ class Paths(unittest.TestCase):
         self.assertEqual(pa.split("mcr.microsoft.com/dotnet/aspnet:9.0"), ("mcr.microsoft.com", "dotnet/aspnet", "9.0"))
         self.assertEqual(pa.split("localhost:5000/app:v1"), ("localhost:5000", "app", "v1"))
 
+    def test_registry_digest_falls_back_to_get_like_docker_pull(self):
+        manifest = b'{"schemaVersion": 2}'
+
+        class Answer:
+            def __init__(self, headers):
+                self.headers = headers
+
+            def getheader(self, name, default=None):
+                return self.headers.get(name, default)
+
+        def registry(answers):
+            asked = []
+
+            class Fake(pa.Registry):
+                def request(self, method, path, repo, hops=0):
+                    asked.append(method)
+                    status, headers = answers[method]
+                    return status, Answer(headers), manifest if method == "GET" else b""
+            return Fake("https://m.example"), asked
+
+        both = {"Docker-Content-Digest": "sha256:" + "d" * 64}
+        reg, asked = registry({"HEAD": (200, both)})
+        self.assertEqual((reg.digest("library/alpine", "3.20"), asked), (both["Docker-Content-Digest"], ["HEAD"]))
+        reg, asked = registry({"HEAD": (404, {}), "GET": (200, both)})
+        self.assertEqual((reg.digest("library/alpine", "3.20"), asked), (both["Docker-Content-Digest"], ["HEAD", "GET"]))
+        reg, asked = registry({"HEAD": (200, {}), "GET": (200, {})})  # no header at all: the manifest's own hash
+        self.assertEqual(reg.digest("library/alpine", "3.20"), "sha256:" + pa.hashlib.sha256(manifest).hexdigest())
+        reg, asked = registry({"HEAD": (404, {}), "GET": (404, {})})
+        with self.assertRaisesRegex(RuntimeError, r"HTTP 404 \(HEAD and GET\)"):
+            reg.digest("library/alpine", "3.20")
+        reg, asked = registry({"HEAD": (405, {}), "GET": (401, {})})
+        with self.assertRaisesRegex(RuntimeError, r"HTTP 401 \(HEAD 405\)"):
+            reg.digest("library/alpine", "3.20")
+
     def test_parse_docker_mirrors(self):
         self.assertEqual(
             pa.parse_docker_mirrors([["a", "https://a"], ["b", "https://b", "mcr.microsoft.com"],
