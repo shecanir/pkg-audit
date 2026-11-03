@@ -113,12 +113,17 @@ class Pinned(http.client.HTTPSConnection):
         self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
 
 
-# Mirrors that do not answer from outside Iran can be asked through a tunnel to a server inside it:
-# AUDIT_SOCKS=host:port of a local SOCKS5 proxy (an `ssh -N -D` to the Iranian server). Which mirrors
-# use it is marked with `via=tunnel` in their line of the mirrors/targets file (no secret there);
+# Mirrors can be asked through a tunnel to a server inside Iran, so they are seen as a user there
+# sees them (and those that do not answer from abroad answer at all): AUDIT_SOCKS=host:port of a
+# local SOCKS5 proxy (an `ssh -N -D` to the Iranian server). With it set, every mirror of the
+# mirrors/targets files uses it, except one whose line says `via=direct` (no secret in those files);
 # how the tunnel connects is not this program's business and is never read or printed by it. The
-# official sources are always asked directly. Without AUDIT_SOCKS a marked mirror is asked directly.
-VIA_TUNNEL = set()
+# official sources are always asked directly. Without AUDIT_SOCKS every mirror is asked directly.
+VIA_TUNNEL = set()  # mirror addresses that use the tunnel when there is one
+
+
+def is_official(url):
+    return any(url.startswith(base) for base in OFFICIAL.values())
 
 
 def tunnel_address():
@@ -128,7 +133,8 @@ def tunnel_address():
 
 
 def via_tunnel(url):
-    return tunnel_address() is not None and any(url.rstrip("/").startswith(base) for base in VIA_TUNNEL)
+    return (tunnel_address() is not None and not is_official(url)
+            and any(url.rstrip("/").startswith(base) for base in VIA_TUNNEL))
 
 
 def _recv_exact(sock, n):
@@ -260,13 +266,15 @@ def split(ref):
 
 
 def read_list(path):
-    """Fields of every non-empty line. A `via=tunnel` field is taken out and the mirror address on
-    that line (the field starting with http) is remembered as one to ask through the tunnel."""
+    """Fields of every non-empty line. The mirror address on a line (the field starting with http)
+    is remembered as one to ask through the tunnel, unless the line has a `via=direct` field. That
+    field, and `via=tunnel` (the default now, still accepted), are taken out of the fields."""
     rows = [line.split("#", 1)[0].split() for line in Path(path).read_text().splitlines()
             if line.split("#", 1)[0].strip()]
     for fields in rows:
-        if "via=tunnel" in fields:
-            fields.remove("via=tunnel")
+        direct = "via=direct" in fields
+        fields[:] = [f for f in fields if f not in ("via=direct", "via=tunnel")]
+        if not direct:
             VIA_TUNNEL.update(f.rstrip("/") for f in fields if f.startswith("http"))
     return rows
 
