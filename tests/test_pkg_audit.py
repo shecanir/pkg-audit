@@ -557,9 +557,17 @@ class History(unittest.TestCase):
         out = pa.page(report)
         self.assertIn('data-q="m.example"', out)
         self.assertIn("۵۰٪ سالم", out)
-        self.assertIn('<b>۰٫۵</b>', out)  # one repository, half its items ok
+        self.assertIn('<b>۹</b>', out)  # 1 ok of 2 checks: little we can be sure of
 
-    def test_providers_rank_by_summed_score(self):
+    def test_confidence_weighs_share_and_amount(self):
+        c = pa.confidence
+        self.assertGreater(c(11, 12), c(1, 16))   # abrha-like over hamdocker-like
+        self.assertGreater(c(94, 94), c(3, 3))    # more checks, same share
+        self.assertGreater(c(11, 12), c(3, 3))
+        self.assertEqual(c(0, 0), 0.0)
+        self.assertAlmostEqual(c(11, 12), 0.646, places=3)
+
+    def test_providers_rank_by_score(self):
         def mirror(url, verdicts):
             return {"url": url, "rows": {i: {"verdict": v, "value": "h", "detail": ""} for i, v in zip(["a@1", "b@1"], verdicts)}}
         g = {"id": "npm", "title": "npm", "note": "n", "items": ["a@1", "b@1"], "mirrors": {
@@ -569,12 +577,11 @@ class History(unittest.TestCase):
             "bad1": mirror("https://npm.bad.example", ["ok", "mismatch"]),
             "bad2": mirror("https://npm2.bad.example", ["ok", "ok"])}}
         out = pa.providers([g], None, [], lambda n: str(n).translate(pa.FA_DIGITS))
-        # big: 1.5 from two repositories, beats small's 1; bad: the mismatching one scores 0
-        self.assertLess(out.index('data-q="big.example"'), out.index('data-q="small.example"'))
-        self.assertIn("<b>۱٫۵</b>", out)
-        # bad also scores 1 (only its clean repository counts); a tie goes to the higher share ok
-        self.assertLess(out.index('data-q="small.example"'), out.index('data-q="bad.example"'))
-        self.assertIn('data-score="1.500" data-pct="0.7500" data-repos="2"', out)  # what the sort buttons read
+        # small: 2 of 2; big: 3 of 4; bad: 2 of 4 trusted (the mismatching repository's ok does not count)
+        order = sorted(["small", "big", "bad"], key=lambda p: out.index(f'data-q="{p}.example"'))
+        self.assertEqual(order, ["small", "big", "bad"])  # 2 of 2 (34) > 3 of 4 (30) > 2 of 4 (15)
+        self.assertIn(f'data-score="{100 * pa.confidence(3, 4):.2f}" data-pct="0.7500" data-repos="2"', out)
+        self.assertIn("امتیاز چطور حساب می‌شود؟", out)
         self.assertIn('data-vsort="score" aria-pressed="true"', out)
         self.assertNotIn('class="verdict', out)  # no banner without a mismatch
 
