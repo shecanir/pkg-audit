@@ -2,7 +2,8 @@
 
 Independent check that package and container **mirrors** serve what the official source serves.
 
-[فارسی](#فارسی)
+**Live:** [audit.shecan.ir](https://audit.shecan.ir), Shecan's deployment, checking Iranian mirrors
+every hour (raw data: [report.json](https://audit.shecan.ir/report.json)). · [فارسی](#فارسی)
 
 A mirror is trusted by every client that points at it. Docker, for one, pulls `alpine:3.20` from a
 mirror and checks no publisher signature: it trusts the digest the mirror names. npm, PyPI, Cargo
@@ -142,6 +143,9 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 ## فارسی
 
 بازرسی مستقل برای اینکه **میرورهای** بسته و ایمیج همان چیزی را می‌دهند که منبع رسمی می‌دهد.
+
+**نسخه‌ی در حال اجرا:** [audit.shecan.ir](https://audit.shecan.ir)؛ میرورهای ایرانی را هر ساعت بررسی می‌کند
+(داده‌ی خام: [report.json](https://audit.shecan.ir/report.json)).
 
 هر کلاینتی که به یک میرور وصل شود به آن اعتماد می‌کند. Docker با `docker pull .../alpine:3.20` هیچ امضای
 ناشری را بررسی نمی‌کند و به digestی که میرور می‌دهد اعتماد می‌کند؛ هش npm و PyPI و Cargo و Maven هم از خود
