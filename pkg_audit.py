@@ -781,6 +781,143 @@ def row_of(rows, item):
 LEGACY_UNCHECKED = ("skipped: the run's time budget", "no answer before the run's time budget")
 
 
+HISTORY_DAYS = 90  # daily counts, and changes other than a mismatch, are kept this long
+
+
+def tehran_day(iso):
+    t = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return t.astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%Y-%m-%d")
+
+
+def add_history(history, report, active):
+    """Add this run's fresh results (the mirrors in `active` only, never a result kept from an earlier
+    run) to `history` and return it:
+      days[day][group/mirror][verdict]  how many item checks got that verdict that day (Tehran date);
+      last[group/mirror/item]           the item's latest verdict, to see changes;
+      events                            every change of an item's verdict, and the first time one is a
+                                        mismatch; mismatches are kept for ever, other changes HISTORY_DAYS.
+    The first result of an item is only remembered (no event) unless it is a mismatch."""
+    at = report["generated"]
+    days = history.setdefault("days", {})
+    last = history.setdefault("last", {})
+    events = history.setdefault("events", [])
+    urls = history.setdefault("mirrors", {})
+    today = days.setdefault(tehran_day(at), {})
+    for g in report["groups"]:
+        for name, m in g["mirrors"].items():
+            if (g["id"], name) not in active:
+                continue
+            key = f"{g['id']}/{name}"
+            urls[key] = m["url"]
+            counts = today.setdefault(key, {})
+            for item, row in m["rows"].items():
+                verdict = row["verdict"]
+                if verdict == "pending":
+                    continue
+                counts[verdict] = counts.get(verdict, 0) + 1
+                before = last.get(f"{key}/{item}")
+                if before != verdict and (before is not None or verdict == "mismatch"):
+                    events.append({"at": at, "group": g["id"], "mirror": name, "item": item, "from": before,
+                                   "to": verdict, "value": row.get("value"), "detail": row.get("detail", "")})
+                last[f"{key}/{item}"] = verdict
+    cutoff = (datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ") - timedelta(days=HISTORY_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for day in [d for d in days if d < cutoff[:10]]:
+        del days[day]
+    history["events"] = [e for e in events if e["at"] >= cutoff or "mismatch" in (e["from"], e["to"])]
+    history["updated"] = at
+    return history
+
+
+def record_history(path, report, active):
+    """Read the history file, add this run and write it back. An unreadable file is kept beside as
+    .broken and a new history starts; a failure here never stops the run."""
+    p = Path(path)
+    try:
+        history = json.loads(p.read_text()) if p.exists() else {}
+        if not isinstance(history, dict):
+            raise ValueError("not an object")
+    except (OSError, ValueError) as exc:
+        print(f"history {path} unreadable ({exc}), kept as {path}.broken; starting a new one", file=sys.stderr)
+        with contextlib.suppress(OSError):
+            p.replace(path + ".broken")
+        history = {}
+    try:
+        history = add_history(history, report, active)
+        write_atomic(path, json.dumps(history, indent=1, sort_keys=True) + "\n")
+        return history
+    except Exception as exc:  # the report and the page matter more than the history
+        print(f"history {path} not written: {exc!r}", file=sys.stderr)
+        return None
+
+
+HISTORY_SHOWN_AFTER = 14  # days with results before the page shows the history; fewer would mislead
+HISTORY_BAR_DAYS = 30
+
+
+def history_days(history):
+    """The days that have results, oldest first; empty while there are fewer than HISTORY_SHOWN_AFTER."""
+    days = sorted(d for d, mirrors in (history or {}).get("days", {}).items() if any(mirrors.values()))
+    return days if len(days) >= HISTORY_SHOWN_AFTER else []
+
+
+def day_tone(c):
+    """Colour class of one day of one mirror: any mismatch is red; else by the share of answered checks
+    that were ok (no answer is not counted against the mirror, it is often the network)."""
+    answered = sum(v for k, v in c.items() if k not in ("unreachable", "pending"))
+    if not c:
+        return "none", answered
+    if c.get("mismatch"):
+        return "bad", answered
+    if not answered:
+        return "err", answered
+    share = c.get("ok", 0) / answered
+    return ("ok" if share >= .99 else "stale" if share >= .9 else "miss"), answered
+
+
+def trend(history, days, key, fa):
+    """The last HISTORY_BAR_DAYS days of one mirror: a bar per day and the share of ok answers."""
+    if not days:
+        return ""
+    shown = days[-HISTORY_BAR_DAYS:]
+    cells, ok, answered, silent = "", 0, 0, 0
+    for d in shown:
+        c = history["days"][d].get(key, {})
+        tone, a = day_tone(c)
+        ok, answered, silent = ok + c.get("ok", 0), answered + a, silent + c.get("unreachable", 0)
+        date = d.replace("-", "/").translate(FA_DIGITS)
+        text = (f"{fa(c.get('ok', 0))} سالم از {fa(a)} پاسخ"
+                + (f"، {fa(c['mismatch'])} ناهمخوان" if c.get("mismatch") else "")
+                + (f"، {fa(c['unreachable'])} بی‌پاسخ" if c.get("unreachable") else "")) if c else "بررسی نشد"
+        cells += f'<i class="d {tone}" data-tt="{date}" data-td="{text}"></i>'
+    pct = f"{fa(round(100 * ok / answered))}٪" if answered else "—"
+    tip = (f"در {fa(len(shown))} روز گذشته {fa(ok)} پاسخ از {fa(answered)} پاسخ همان مقدار منبع رسمی بود"
+           + (f"؛ {fa(silent)} بار جوابی نیامد که حساب نشده" if silent else "") + ".")
+    return (f'<span class="trend"><span class="bars">{cells}</span>'
+            f'<span class="pct" tabindex="0" data-td="{tip}">{fa(len(shown))} روز: {pct}</span></span>')
+
+
+def mismatch_log(history, days, fa):
+    """The note on past mismatches: every one in the history, newest first, or that there was none."""
+    if not days:
+        return ""
+    seen = [e for e in history.get("events", []) if e["to"] == "mismatch"]
+    since = days[0].replace("-", "/").translate(FA_DIGITS)
+    if not seen:
+        return (f'<h2>سابقه‌ی ناهمخوانی‌ها</h2><p>از {since} ({fa(len(days))} روز) تا امروز در هیچ میروری '
+                f'ناهمخوانی دیده نشده است.</p>')
+    urls = history.get("mirrors", {})
+    rows = ""
+    for e in sorted(seen, key=lambda e: e["at"], reverse=True)[:50]:
+        host = urls.get(f"{e['group']}/{e['mirror']}", e["mirror"]).split("://", 1)[-1]
+        fixed = next((x["at"] for x in history["events"] if x["at"] > e["at"] and x["group"] == e["group"]
+                      and x["mirror"] == e["mirror"] and x["item"] == e["item"] and x["from"] == "mismatch"), None)
+        rows += (f'<li><bdi dir="ltr">{html.escape(host)}</bdi> · <bdi dir="ltr">{html.escape(e["item"])}</bdi> · '
+                 f'{tehran_day(e["at"]).replace("-", "/").translate(FA_DIGITS)}'
+                 f'{"، رفع شد " + tehran_day(fixed).replace("-", "/").translate(FA_DIGITS) if fixed else "، هنوز ناهمخوان"}</li>')
+    return (f'<h2>سابقه‌ی ناهمخوانی‌ها</h2><p>هر باری که از {since} تا امروز میروری مقداری داد که منبع رسمی '
+            f'نداشت، این‌جا می‌ماند؛ حتی اگر بعداً درست شده باشد:</p><ul>{rows}</ul>')
+
+
 def load_state(path):
     """Previous report by group id; anything unreadable is simply no state. Rows that older versions
     saved for checks they never made (out of time) are dropped, so those mirrors are checked again."""
@@ -955,6 +1092,13 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 .nums .t.zero{opacity:.55}.nums .t.zero b:first-child{color:var(--muted)}
 .nums .t.hot.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--badbg) 100%,var(--card))}
 .nums .t.hot.bad b:first-child{color:var(--bad)}
+.trend{display:flex;align-items:center;gap:8px;margin-top:4px}
+.bars{display:flex;gap:2px;direction:ltr}
+.bars .d{width:4px;height:12px;border-radius:2px;background:var(--ok);display:block}
+.bars .d.stale{background:var(--stale)}.bars .d.miss{background:var(--miss)}.bars .d.bad{background:var(--bad)}
+.bars .d.err{background:var(--err);opacity:.6}.bars .d.none{background:var(--line)}
+.trend .pct{color:var(--muted);font-size:11.5px;white-space:nowrap;cursor:help}
+section.note.past ul{list-style:none;padding:0}section.note.past li{font-size:13.5px}
 .tip{position:fixed;z-index:50;top:0;left:0;max-width:min(360px,calc(100vw - 24px));background:var(--card);color:var(--fg);
 border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12.5px;line-height:1.65;
 box-shadow:0 12px 32px -12px rgba(0,0,0,.35);pointer-events:none;opacity:0;transition:opacity .12s}
@@ -1121,7 +1265,7 @@ document.addEventListener('click',function(e){
 </script>'''
 
 
-def render_group(g, fa):
+def render_group(g, fa, history=None, days=()):
     mirrors = g["mirrors"]
     summary = []
     for n, m in mirrors.items():
@@ -1163,14 +1307,14 @@ def render_group(g, fa):
                       f'data-td="{html.escape(detail)}">'
                       f'<span aria-hidden="true">{icon}</span>{label}</span></li>')
         opened = " open" if bad else ""
-        out += (f'<details class="m"{opened} {key}><summary><div class="who"><span class="host">{host}</span>{tag}<span class="when{" old" if seen[1] else ""}">{seen[0]}{" · در صف بررسی" if m.get("queued") and m.get("checked_at") else ""}</span></div>'
+        out += (f'<details class="m"{opened} {key}><summary><div class="who"><span class="host">{host}</span>{tag}<span class="when{" old" if seen[1] else ""}">{seen[0]}{" · در صف بررسی" if m.get("queued") and m.get("checked_at") else ""}</span>{trend(history, days, f"{g['id']}/{n}", fa)}</div>'
                 f'<div class="score {tone}">{fa(pct)}٪<small>{fa(done)} از {fa(len(refs))}</small></div>'
                 f'<div class="strip">{strip}</div></summary><ul class="items">{items}</ul></details>')
     return (f'<h2 class="gt" id="{g["id"]}">{html.escape(g["title"])}</h2>'
             f'<p class="gn">{html.escape(g["note"])}</p><div class="list">{out}</div>')
 
 
-def page(report):
+def page(report, history=None):
     # Ecosystems with the most mirrors first; equal ones keep the report's order.
     groups = sorted(report["groups"], key=lambda g: -len(g["mirrors"]))
     counts = {"ok": 0, "stale": 0, "mismatch": 0, "missing": 0, "unreachable": 0, "error": 0}
@@ -1269,7 +1413,9 @@ def page(report):
     nav += ('<span class="sort" role="group" aria-label="ترتیب">'
             '<button type="button" data-sort="score" aria-pressed="true">بیشترین امتیاز</button>'
             '<button type="button" data-sort="name" aria-pressed="false">الفبا</button></span>')
-    sections = "".join(render_group(g, fa) for g in groups)
+    days = history_days(history)
+    sections = "".join(render_group(g, fa, history, days) for g in groups)
+    past = mismatch_log(history, days, fa)
 
     src = BRAND["source_url"]
     src_label = html.escape(src.split("://", 1)[-1].rstrip("/"))
@@ -1309,6 +1455,7 @@ def page(report):
 <div id="sres" role="status" aria-live="polite"></div>
 <nav class="tabs">{nav}</nav>
 {sections}
+{f'<section class="note past">{past}</section>' if past else ""}
 <section class="note"><h2>این صفحه چه چیزی را نشان می‌دهد؟</h2>
 <p>برای هر اکوسیستم، همان داده‌ای را از میرور و از منبع رسمی می‌گیریم که ابزار نصب به آن اعتماد می‌کند
 (digest در Docker، هش در npm و PyPI، cksum در Cargo، sha1 در Maven، فایل checksum نصب‌کننده‌ها) و مقایسه می‌کنیم.
@@ -1362,6 +1509,8 @@ def main():
     ap.add_argument("--slot", type=int, help="force this turn (0..slots-1) instead of reading the clock")
     ap.add_argument("--queue", help="re-check requests (written by serve.py): the mirrors in it are checked in this "
                                     "run whatever their turn, then removed from it")
+    ap.add_argument("--history", help="history file (JSON) to add this run's results to: daily counts per mirror "
+                                      "and every change of an item's verdict")
     ap.add_argument("--json", help="write the report here")
     ap.add_argument("--html", help="write the static page here")
     args = ap.parse_args()
@@ -1417,10 +1566,11 @@ def main():
         for g in report["groups"]:
             for name, m in g["mirrors"].items():
                 m["queued"] = f"{g['id']}/{name}" in waiting
+    history = record_history(args.history, report, active) if args.history else None
     if args.json:
         write_atomic(args.json, json.dumps(report, indent=2) + "\n")
     if args.html:
-        write_atomic(args.html, page(report))
+        write_atomic(args.html, page(report, history))
     bad = 0
     print(f"turn {slot + 1}/{slots}: {len(active)} mirror entries checked, "
           f"{sum(len(g['mirrors']) for g in report['groups']) - len(active)} kept from the previous run")

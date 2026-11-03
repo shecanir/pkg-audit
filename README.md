@@ -55,6 +55,12 @@ python3 pkg_audit.py ... --state site/report.json --json site/report.json \
   result and its time (the page shows "last checked HH:MM"), until its turn comes.
 - A mirror with no earlier result (new, changed URL, new items) is checked at once.
 - Only the official sources needed by this run's mirrors are asked.
+- `--history site/history.json` adds each run's fresh results to a history file: for every day
+  (Tehran date) and mirror, how many item checks got each verdict, and a list of every change of an
+  item's verdict. Mismatches stay in it for ever; daily counts and other changes for 90 days. Results
+  kept from an earlier run are not counted again. Once the history has 14 days with results, the
+  page shows it: a bar per day (last 30) and the share of ok answers under each mirror, and a list
+  of every mismatch ever seen. No answer is left out of that share; it is often the network.
 - `--workers N` (default 6) hosts are checked at the same time, but a host never gets more than one
   request at a time, however many ecosystems it serves.
 
