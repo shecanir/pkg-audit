@@ -89,6 +89,23 @@ Exit status is 2 when any `mismatch` is found, so a CI job fails and notifies. C
 to `index.html` (font and icon the page references). `examples/` has the list formats and a GitLab
 CI job; pin the commit of this repository you reviewed.
 
+## How providers are ranked
+
+The page groups mirrors by the registrable domain of their host (`mirror.example.ir` and
+`docker.example.ir` are one provider, `example.ir`); that says nothing about who runs them.
+
+- Each repository checked here (one mirror of one ecosystem) scores the share of its items that
+  matched the official source, from 0 to 1. A repository that served a single mismatch scores 0.
+- A provider's score is the sum over its repositories, so more repositories that answer correctly
+  rank higher. Ties go to the higher share of ok answers, then to the name.
+- Once two weeks of history exist, each provider also shows its last 30 days.
+
+The auditor is run by Shecan (audit.shecan.ir), which also runs mirrors that appear on the page.
+Shecan's mirrors get no advantage: the same formula, the same checks, sorted with everyone else, and
+only a grey tag that discloses who runs the page. If you know a fairer or more useful measure, open an
+[issue](https://github.com/shecanir/pkg-audit/issues) or a pull request; we want the ranking to help
+the people who choose a mirror, and to improve our own service by it.
+
 ## What a green result does not prove
 
 - That the auditor got a correct answer, not that every client, at every time, does. A mirror that
@@ -135,6 +152,20 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 - سبز یعنی بازرس جواب درست گرفته، نه اینکه همه‌ی کاربران همیشه همین را می‌گیرند. حمله‌ی مخصوص بعضی
   نشانی‌ها یا زمان قطعی اینترنت دیده نمی‌شود.
 - برای پروژه‌های حساس هش را خودتان ثابت کنید (lockfile با هش، `--require-hashes`، `image@sha256:…`).
+
+### رتبه‌بندی ارائه‌دهنده‌ها
+
+میرورها بر اساس دامنه‌ی میزبان گروه می‌شوند (`mirror.example.ir` و `docker.example.ir` یک ارائه‌دهنده‌اند)؛
+این چیزی درباره‌ی اینکه چه کسی آن‌ها را اداره می‌کند نمی‌گوید. هر مخزنی که این‌جا بررسی می‌شود (میرور
+یک اکوسیستم) به اندازه‌ی سهم موردهایی که با منبع رسمی خواندند، از ۰ تا ۱، امتیاز می‌گیرد و مخزنی که حتی
+یک مورد ناهمخوان بدهد ۰ می‌گیرد. امتیاز ارائه‌دهنده جمع امتیاز مخزن‌های اوست؛ در امتیاز برابر، سهم بیشتر
+پاسخ سالم و بعد نام جلو می‌افتد.
+
+این بازرس را شکن اجرا می‌کند و میرورهای شکن هم در همین صفحه هستند. شکن در این رتبه‌بندی هیچ امتیاز
+ویژه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب، و فقط یک برچسب خاکستری که می‌گوید اداره‌کننده‌ی
+صفحه کیست. اگر معیار منصفانه‌تر یا مفیدتری می‌شناسید، در
+[issueها](https://github.com/shecanir/pkg-audit/issues) یا با pull request پیشنهاد دهید تا اضافه شود؛
+ما به دنبال بهتر کردن خودمان و خدمات‌مان برای کاربران هستیم.
 
 اجرا و قالب فایل‌ها در `examples/` است. لایسنس: Apache-2.0.
 

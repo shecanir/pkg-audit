@@ -1105,13 +1105,15 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 section.note.past ul{list-style:none;padding:0}section.note.past li{font-size:13.5px}
 .vendors{margin:18px 0 6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
 .vtitle{padding:14px 20px 8px}.vtitle h2{font-size:17px;margin:0;line-height:1.5}.vtitle p{margin:0;color:var(--muted);font-size:12.5px}
-.vhead,.vrow{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.4fr) 76px minmax(0,1.3fr);gap:2px 16px;align-items:center;padding:6px 20px}
-.vendors.hist .vhead,.vendors.hist .vrow{grid-template-columns:minmax(0,1.3fr) minmax(0,1.2fr) 76px minmax(0,1.1fr) minmax(0,1.2fr)}
+.vhead,.vrow{display:grid;grid-template-columns:minmax(0,1.3fr) 44px minmax(0,1.3fr) 112px minmax(0,1.1fr);gap:2px 16px;align-items:center;padding:6px 20px}
+.vendors.hist .vhead,.vendors.hist .vrow{grid-template-columns:minmax(0,1.3fr) 44px minmax(0,1.1fr) 112px minmax(0,1fr) minmax(0,1.2fr)}
+.vrepo{text-align:center}.vrepo b{display:block;font-size:15px;line-height:1.3}.vrepo small{color:var(--muted);font-size:11px}
+.vpct{cursor:help}
 .vhead{font-size:11.5px;font-weight:600;color:var(--muted);border-top:1px solid var(--line);padding-top:7px;padding-bottom:7px}
 .vrow{width:100%;font:inherit;color:inherit;text-align:start;background:none;border:0;border-top:1px solid var(--line);cursor:pointer;transition:background .15s}
 .vrow:hover,.vrow:focus-visible{background:var(--glow);outline:none}
 .vn{min-width:0}.vn bdi{font:600 13px ui-monospace,Menlo,Consolas,monospace}.vn .tag{vertical-align:1px}
-.vn small{display:block;color:var(--muted);font-size:11.5px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vn small{display:block;color:var(--muted);font-size:11.5px;line-height:1.5}
 .vbar{display:flex;gap:2px;height:8px;border-radius:99px;overflow:hidden;background:var(--line);direction:ltr}
 .seg{display:block;min-width:3px}.seg.ok{background:var(--ok)}.seg.bad{background:var(--bad)}.seg.stale{background:var(--stale)}
 .seg.miss{background:var(--miss)}.seg.fail{background:var(--fail)}.seg.err{background:var(--err);opacity:.6}
@@ -1120,7 +1122,8 @@ section.note.past ul{list-style:none;padding:0}section.note.past li{font-size:13
 .vh .trend{margin:0}
 @media(max-width:680px){.vhead{display:none}
 .vrow,.vendors.hist .vrow{grid-template-columns:minmax(0,1fr) auto;padding:11px 16px}
-.vbar,.vis,.vh{grid-column:1/-1}.vis.clean{display:none}.vpct{grid-row:1;grid-column:2;text-align:end}}
+.vbar,.vis,.vh{grid-column:1/-1}.vis.clean{display:none}.vpct{grid-row:1;grid-column:2;text-align:end}
+.vrepo{display:none}.vn small:before{content:attr(data-r) " · "}}
 .tip{position:fixed;z-index:50;top:0;left:0;max-width:min(360px,calc(100vw - 24px));background:var(--card);color:var(--fg);
 border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12.5px;line-height:1.65;
 box-shadow:0 12px 32px -12px rgba(0,0,0,.35);pointer-events:none;opacity:0;transition:opacity .12s}
@@ -1300,29 +1303,34 @@ PARTS = [("ok", "ok", "سالم"), ("mismatch", "bad", "ناهمخوان"), ("st
 
 
 def providers(groups, history, days, fa):
-    """One row per provider (domain): its ecosystems, how many of its checks were ok, what the rest were,
-    and, once there is history, its last days. A row filters the lists to that domain."""
+    """One row per provider (domain): its repositories checked here, their summed score, a bar of its
+    answers by status, what the rest were and, once there is history, its last days. A repository scores
+    its share of ok items (0 to 1), and 0 if it served a single mismatch; providers rank by the sum, so
+    more repositories that answer right rank higher. A row filters the lists to that domain."""
     per = {}
     for g in groups:
         for n, m in g["mirrors"].items():
             p = provider(urllib.parse.urlsplit(m["url"]).hostname)
-            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False})
+            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "score": 0.0})
             if g["title"] not in v["groups"]:
                 v["groups"].append(g["title"])
             v["keys"].append(f"{g['id']}/{n}")
             v["ours"] = v["ours"] or (bool(BRAND["ours"]) and n == BRAND["ours"])
-            for item in m.get("items", g["items"]):
-                verdict = row_of(m["rows"], item)["verdict"]
+            refs = m.get("items", g["items"])
+            verdicts = [row_of(m["rows"], item)["verdict"] for item in refs]
+            for verdict in verdicts:
                 v["counts"][verdict] = v["counts"].get(verdict, 0) + 1
+            if refs and "mismatch" not in verdicts:
+                v["score"] += verdicts.count("ok") / len(refs)
     if not per:
         return ""
     rows = []
     for p, v in per.items():
         c = v["counts"]
         total = sum(n for k, n in c.items() if k != "pending")
-        rows.append((-(c.get("ok", 0) / total if total else 0), p, v, c, total))
+        rows.append((-round(v["score"], 2), -(c.get("ok", 0) / total if total else 0), p, v, c, total))
     out = ""
-    for _, p, v, c, total in sorted(rows, key=lambda r: r[:2]):  # by score, then by name: size buys no place
+    for *_, p, v, c, total in sorted(rows, key=lambda r: r[:3]):  # summed score, then share ok, then name
         ok = c.get("ok", 0)
         segs = "".join(f'<span class="seg {cls}" style="flex:{c[k]}"></span>' for k, cls, _ in PARTS if c.get(k))
         parts = "، ".join(f"{fa(c[k])} {label}" for k, _, label in PARTS if c.get(k))
@@ -1330,16 +1338,21 @@ def providers(groups, history, days, fa):
         ecos = "، ".join(html.escape(t) for t in v["groups"][:3]) + (f" +{fa(len(v['groups']) - 3)}" if len(v["groups"]) > 3 else "")
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if v["ours"] else ""
         past = f'<span class="vh">{trend(history, days, v["keys"], fa)}</span>' if days else ""
+        repos = len(v["keys"])
+        score = fa(f"{v['score']:.1f}".removesuffix(".0")).replace(".", "٫")
+        why = (f"جمع امتیاز {fa(repos)} مخزن: هر مخزن به اندازه‌ی سهم پاسخ‌های سالمش، از ۰ تا ۱؛ "
+               f"مخزنی که حتی یک مورد ناهمخوان داشته باشد ۰.")
         out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}">'
-                f'<span class="vn"><bdi dir="ltr">{html.escape(p)}</bdi>{tag}<small>{ecos}</small></span>'
+                f'<span class="vn"><bdi dir="ltr">{html.escape(p)}</bdi>{tag}<small data-r="{fa(repos)} مخزن">{ecos}</small></span>'
+                f'<span class="vrepo"><b>{fa(repos)}</b><small>مخزن</small></span>'
                 f'<span class="vbar" data-td="{parts}">{segs}</span>'
-                f'<span class="vpct"><b>{fa(round(100 * ok / total)) + "٪" if total else "—"}</b>'
-                f'<small>{fa(ok)} از {fa(total)}</small></span>'
+                f'<span class="vpct" data-td="{why}"><b>{score}</b>'
+                f'<small>{fa(round(100 * ok / total)) + "٪" if total else "—"} سالم · {fa(ok)} از {fa(total)}</small></span>'
                 f'<span class="vis{"" if rest else " clean"}">{rest or "همه سالم"}</span>{past}</button>')
-    head = ('<div class="vhead"><span>ارائه‌دهنده</span><span>پاسخ‌ها</span><span>سالم</span><span>بقیه</span>'
+    head = ('<div class="vhead"><span>ارائه‌دهنده</span><span>مخزن</span><span>پاسخ‌ها</span><span>امتیاز</span><span>بقیه</span>'
             + (f"<span>{fa(min(len(days), HISTORY_BAR_DAYS))} روز گذشته</span>" if days else "") + "</div>")
     return (f'<section class="vendors{" hist" if days else ""}"><div class="vtitle"><h2>ارائه‌دهنده‌ها</h2>'
-            f'<p>میرورها بر اساس دامنه‌ی میزبان، از بیشترین پاسخ سالم؛ برای دیدن میرورهای هر کدام بزنید.</p></div>'
+            f'<p>میرورها بر اساس دامنه‌ی میزبان. امتیاز جمع امتیاز مخزن‌هایی است که این‌جا بررسی می‌شوند (هر مخزنِ کاملاً سالم ۱)؛ برای دیدن میرورهای هر کدام بزنید.</p></div>'
             f'{head}{out}</section>')
 
 
