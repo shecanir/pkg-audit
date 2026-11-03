@@ -94,12 +94,14 @@ CI job; pin the commit of this repository you reviewed.
 The page groups mirrors by the registrable domain of their host (`mirror.example.ir` and
 `docker.example.ir` are one provider, `example.ir`); that says nothing about who runs them.
 
-- A provider's score (0-100) is the lower bound of the 95% Wilson confidence interval of its share
-  of ok answers, over every item of every repository checked here (one mirror of one ecosystem).
-  Both the share and the amount of evidence count: 11 ok of 12 beats 1 of 16, and 94 of 94 beats
-  3 of 3, but size alone does not win.
-- No answer and errors are not ok. Every item of a repository that served a single mismatch counts
-  as not ok.
+- A provider's score is **healthy repositories × confidence**. Each repository checked here (one
+  mirror of one ecosystem) adds its share of ok items, 0 to 1, to the healthy repositories, so wider
+  coverage scores higher. The confidence is the lower bound of the 95% Wilson interval of the share
+  of ok answers over all its items, so many repositories that mostly fail do not rank high (one
+  repository at 11 of 12 beats five that answered 1 of 16). The number reads roughly as "how many
+  fully healthy repositories we can be sure of".
+- No answer and errors are not ok. A repository that served a single mismatch adds 0 and its items
+  count as not ok.
 - Ties go to the higher share of ok answers, then to the name. Visitors can also sort by share ok,
   number of repositories or name; the formula is explained under the table.
 - Once two weeks of history exist, each provider also shows its last 30 days.
@@ -161,11 +163,11 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 
 میرورها بر اساس دامنه‌ی میزبان گروه می‌شوند (`mirror.example.ir` و `docker.example.ir` یک ارائه‌دهنده‌اند)؛
 این چیزی درباره‌ی اینکه چه کسی آن‌ها را اداره می‌کند نمی‌گوید. هر مخزنی که این‌جا بررسی می‌شود (میرور
-یک اکوسیستم) بررسی می‌شود. امتیاز ارائه‌دهنده (۰ تا ۱۰۰) سهمی از همه‌ی پاسخ‌های اوست که با ۹۵٪ اطمینان
-سالم است (کران پایین بازه‌ی ویلسون)؛ پس هم درصد سالم مهم است و هم تعداد بررسی‌ها: ۱۱ سالم از ۱۲ از ۱ از ۱۶
-بالاتر است و ۹۴ از ۹۴ از ۳ از ۳، ولی بزرگی به‌تنهایی برنده نمی‌شود. بی‌پاسخ و خطا سالم نیستند، و همه‌ی
-پاسخ‌های مخزنی که حتی یک مورد ناهمخوان بدهد ناسالم حساب می‌شوند. در امتیاز برابر، سهم بیشتر پاسخ سالم و
-بعد نام جلو می‌افتد.
+یک اکوسیستم) بررسی می‌شود. امتیاز ارائه‌دهنده = **تعداد مخزن‌های سالم × اطمینان به سلامت پاسخ‌ها**. هر مخزن
+به اندازه‌ی سهم موردهای سالمش، از ۰ تا ۱، در تعداد مخزن‌های سالم حساب می‌شود؛ پس پوشش بیشتر امتیاز بیشتری
+می‌آورد. اطمینان، کران پایین بازه‌ی ۹۵٪ ویلسون برای سهم پاسخ‌های سالم است؛ پس ارائه‌دهنده‌ای که مخزن زیاد
+دارد ولی بیشترشان جواب درست نمی‌دهند بالا نمی‌آید. بی‌پاسخ و خطا سالم نیستند و مخزنی که حتی یک مورد ناهمخوان
+بدهد صفر می‌گیرد. در امتیاز برابر، سهم بیشتر پاسخ سالم و بعد نام جلو می‌افتد.
 
 این بازرس را شکن اجرا می‌کند و میرورهای شکن هم در همین صفحه هستند. شکن در این رتبه‌بندی هیچ امتیاز
 ویژه‌ای و هیچ برچسب جداگانه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب؛ اینکه صفحه را شکن اداره

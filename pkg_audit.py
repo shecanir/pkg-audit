@@ -1242,7 +1242,7 @@ document.addEventListener('click',function(e){var r=e.target.closest&&e.target.c
   q.value=r.dataset.q;run();var to=document.querySelector('nav.tabs');if(to)to.scrollIntoView({behavior:'smooth',block:'start'})});
 function order(by){
   groups.forEach(function(g){g.rows.slice().sort(function(a,b){
-    if(by==='score'){var d=a.dataset.score-b.dataset.score||a.dataset.bad-b.dataset.bad;if(d)return d}
+    if(by==='score'){var d=a.dataset.score-b.dataset.score||a.dataset.bad-b.dataset.bad||(b.dataset.p||0)-(a.dataset.p||0);if(d)return d}
     return a.dataset.name<b.dataset.name?-1:a.dataset.name>b.dataset.name?1:0}).forEach(function(d){g.list.appendChild(d)})});
   [].forEach.call(document.querySelectorAll('.sort button'),function(b){b.setAttribute('aria-pressed',b.dataset.sort===by)});
   try{localStorage.setItem('sort',by)}catch(e){}}
@@ -1349,16 +1349,14 @@ def confidence(ok, n, z=1.96):
     return (p + z * z / (2 * n) - z * ((p * (1 - p) + z * z / (4 * n)) / n) ** .5) / (1 + z * z / n)
 
 
-def providers(groups, history, days, fa):
-    """One row per provider (domain): its repositories checked here, its score, a bar of its answers by
-    status, what the rest were and, once there is history, its last days. The score (0-100) is the
-    confidence bound of its share of ok answers; every item of a repository that served a mismatch
-    counts as not ok. A row filters the lists to that domain."""
+def provider_stats(groups):
+    """Per provider (domain): its ecosystems, verdict counts, mirror keys, healthy repositories, the
+    confidence bound of its share of ok answers and the score (healthy x confidence)."""
     per = {}
     for g in groups:
         for n, m in g["mirrors"].items():
             p = provider(urllib.parse.urlsplit(m["url"]).hostname)
-            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "trusted": 0})
+            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "trusted": 0, "healthy": 0.0})
             if g["title"] not in v["groups"]:
                 v["groups"].append(g["title"])
             v["keys"].append(f"{g['id']}/{n}")
@@ -1369,14 +1367,28 @@ def providers(groups, history, days, fa):
                 v["counts"][verdict] = v["counts"].get(verdict, 0) + 1
             if "mismatch" not in verdicts:  # a repository that served a forged value earns nothing
                 v["trusted"] += verdicts.count("ok")
+                v["healthy"] += verdicts.count("ok") / len(refs) if refs else 0
+    for v in per.values():
+        v["total"] = sum(n for k, n in v["counts"].items() if k != "pending")
+        v["sure"] = confidence(v["trusted"], v["total"])
+        v["score"] = v["healthy"] * v["sure"]
+    return per
+
+
+def providers(groups, history, days, fa):
+    """One row per provider (domain): its repositories checked here, its score, a bar of its answers by
+    status, what the rest were and, once there is history, its last days. The score is coverage times
+    quality: its healthy repositories (each counts its share of ok items, 0 to 1) times the confidence
+    bound of its share of ok answers. So more repositories that answer right rank higher, and many
+    repositories that mostly fail do not. A repository that served a mismatch counts 0 and its items
+    as not ok. A row filters the lists to that domain."""
+    per = provider_stats(groups)
     if not per:
         return ""
     rows = []
     for p, v in per.items():
-        c = v["counts"]
-        total = sum(n for k, n in c.items() if k != "pending")
-        v["score"] = 100 * confidence(v["trusted"], total)
-        rows.append((-round(v["score"], 1), -(c.get("ok", 0) / total if total else 0), p, v, c, total))
+        c, total = v["counts"], v["total"]
+        rows.append((-round(v["score"], 2), -(c.get("ok", 0) / total if total else 0), p, v, c, total))
     out = ""
     for *_, p, v, c, total in sorted(rows, key=lambda r: r[:3]):  # score, then share ok, then name
         ok = c.get("ok", 0)
@@ -1387,11 +1399,12 @@ def providers(groups, history, days, fa):
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if v["ours"] else ""
         past = f'<span class="vh">{trend(history, days, v["keys"], fa)}</span>' if days else ""
         repos = len(v["keys"])
-        score = fa(round(v["score"])) if total else "—"
-        why = (f"سهمی از پاسخ‌ها که با ۹۵٪ اطمینان سالم است، از {fa(total)} بررسی"
-               f"{'؛ موردهای مخزنی که ناهمخوانی داشت سالم حساب نشد' if v['trusted'] < ok else ''}.")
+        num = lambda x: fa(f"{x:.1f}").replace(".", "٫")
+        score = num(v["score"]) if total else "—"
+        why = (f"{num(v['healthy'])} مخزن سالم × {fa(round(100 * v['sure']))}٪ اطمینان به سلامت {fa(total)} پاسخ"
+               f"{'؛ مخزنی که ناهمخوانی داشت حساب نشد' if v['trusted'] < ok else ''}.")
         share = ok / total if total else 0
-        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}" data-score="{v["score"]:.2f}" '
+        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}" data-score="{v["score"]:.3f}" '
                 f'data-pct="{share:.4f}" data-repos="{repos}" data-name="{html.escape(p)}">'
                 f'<span class="vn"><bdi dir="ltr">{html.escape(p)}</bdi>{tag}<small data-r="{fa(repos)} مخزن">{ecos}</small></span>'
                 f'<span class="vrepo"><b>{fa(repos)}</b><small>مخزن</small></span>'
@@ -1415,14 +1428,16 @@ def rank_note():
     ask = (f' معیار بهتری به نظرتان می‌رسد؟ در <a href="{html.escape(src)}/issues" rel="noopener">issueها</a> '
            f'پیشنهاد دهید یا pull request بفرستید تا اضافه شود؛ '
            f'<a href="{html.escape(src)}#how-providers-are-ranked" rel="noopener">توضیح کامل</a>.') if src else ""
-    return ('<p class="vfoot"><b>امتیاز چطور حساب می‌شود؟</b> امتیاز (۰ تا ۱۰۰) سهمی از پاسخ‌های ارائه‌دهنده است '
-            'که با ۹۵٪ اطمینان می‌توان گفت سالم است (کران پایین بازه‌ی ویلسون). پس هم درصد سالم مهم است و هم '
-            'تعداد بررسی‌ها: ۱۱ سالم از ۱۲ از ۱ سالم از ۱۶ بالاتر است، و ۹۴ از ۹۴ از ۳ از ۳. بی‌پاسخ و خطا سالم '
-            'حساب نمی‌شوند، و اگر مخزنی حتی یک مورد ناهمخوان بدهد، هیچ‌کدام از پاسخ‌هایش سالم حساب نمی‌شود. '
+    return ('<p class="vfoot"><b>امتیاز چطور حساب می‌شود؟</b> امتیاز = <b>تعداد مخزن‌های سالم</b> × '
+            '<b>اطمینان به سلامت پاسخ‌ها</b>. هر مخزنی که این‌جا بررسی می‌شود به اندازه‌ی سهم موردهای سالمش، '
+            'از ۰ تا ۱، در تعداد مخزن‌های سالم حساب می‌شود؛ پس پوشش بیشتر امتیاز بیشتری می‌آورد. اطمینان، سهمی از '
+            'همه‌ی پاسخ‌هاست که با ۹۵٪ اطمینان سالم است (کران پایین بازه‌ی ویلسون)؛ پس ارائه‌دهنده‌ای که مخزن زیاد '
+            'دارد ولی بیشترشان جواب درست نمی‌دهند بالا نمی‌آید. بی‌پاسخ و خطا سالم حساب نمی‌شوند و مخزنی که حتی '
+            'یک مورد ناهمخوان بدهد صفر می‌گیرد. عدد امتیاز تقریباً یعنی «چند مخزن کاملاً سالم و مطمئن». '
             f'همه‌ی ارائه‌دهنده‌ها، از جمله شکن، با همین فرمول سنجیده می‌شوند.{ask}</p>')
 
 
-def render_group(g, fa, history=None, days=()):
+def render_group(g, fa, history=None, days=(), pscore=None):
     mirrors = g["mirrors"]
     summary = []
     for n, m in mirrors.items():
@@ -1434,16 +1449,19 @@ def render_group(g, fa, history=None, days=()):
         refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
         share = done / len(refs) if refs else 0
         host = m["url"].split("://", 1)[-1]
-        summary.append((not ours, -share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
-    summary.sort(key=lambda t: t[1:5])  # best score, fewer problems, then by name; ours gets no place of its own
+        ps = (pscore or {}).get(provider(urllib.parse.urlsplit(m["url"]).hostname), 0)
+        summary.append((not ours, -share, bad, -answered, -ps, host.lower(), n, m, done, bad, answered, ours, refs, ps))
+    # best score, fewer problems, more answers, the stronger provider, then by name; ours gets no place of its own
+    summary.sort(key=lambda t: t[1:6])
     out = ""
-    for _, share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
+    for _, share, _, _, _, _, n, m, done, bad, answered, ours, refs, ps in summary:
         seen = checked_label(m.get("checked_at"))
         rows = m["rows"]
         pct = round(100 * done / len(refs)) if refs else 0
         tone = "none" if not answered else "alert" if bad else "good" if done == len(refs) else "warn"
         host = html.escape(m["url"].split("://", 1)[-1])
-        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"{" data-ours=1" if ours else ""}'
+        key = (f'data-score="{share:.4f}" data-bad="{bad}" data-p="{ps:.3f}" data-name="{host.lower()}"'
+               f'{" data-ours=1" if ours else ""}')
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if ours else ""
         strip = ""
         for ref in refs:
@@ -1541,7 +1559,8 @@ def page(report, history=None):
     sort = ('<span class="lsort"><span aria-hidden="true">ترتیب میرورها</span><span class="sort" role="group" aria-label="ترتیب میرورها">'
             '<button type="button" data-sort="score" aria-pressed="true">بیشترین امتیاز</button>'
             '<button type="button" data-sort="name" aria-pressed="false">الفبا</button></span></span>')
-    sections = "".join(render_group(g, fa, history, days) for g in groups)
+    pscore = {p: v["score"] for p, v in provider_stats(groups).items()}
+    sections = "".join(render_group(g, fa, history, days, pscore) for g in groups)
     past = mismatch_log(history, days, fa)
 
     src = BRAND["source_url"]
