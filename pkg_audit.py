@@ -1351,14 +1351,16 @@ def confidence(ok, n, z=1.96):
 
 def providers(groups, history, days, fa):
     """One row per provider (domain): its repositories checked here, its score, a bar of its answers by
-    status, what the rest were and, once there is history, its last days. The score (0-100) is the
-    confidence bound of its share of ok answers; every item of a repository that served a mismatch
-    counts as not ok. A row filters the lists to that domain."""
+    status, what the rest were and, once there is history, its last days. The score is coverage times
+    quality: its healthy repositories (each counts its share of ok items, 0 to 1) times the confidence
+    bound of its share of ok answers. So more repositories that answer right rank higher, and many
+    repositories that mostly fail do not. A repository that served a mismatch counts 0 and its items
+    as not ok. A row filters the lists to that domain."""
     per = {}
     for g in groups:
         for n, m in g["mirrors"].items():
             p = provider(urllib.parse.urlsplit(m["url"]).hostname)
-            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "trusted": 0})
+            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "trusted": 0, "healthy": 0.0})
             if g["title"] not in v["groups"]:
                 v["groups"].append(g["title"])
             v["keys"].append(f"{g['id']}/{n}")
@@ -1369,14 +1371,16 @@ def providers(groups, history, days, fa):
                 v["counts"][verdict] = v["counts"].get(verdict, 0) + 1
             if "mismatch" not in verdicts:  # a repository that served a forged value earns nothing
                 v["trusted"] += verdicts.count("ok")
+                v["healthy"] += verdicts.count("ok") / len(refs) if refs else 0
     if not per:
         return ""
     rows = []
     for p, v in per.items():
         c = v["counts"]
         total = sum(n for k, n in c.items() if k != "pending")
-        v["score"] = 100 * confidence(v["trusted"], total)
-        rows.append((-round(v["score"], 1), -(c.get("ok", 0) / total if total else 0), p, v, c, total))
+        v["sure"] = confidence(v["trusted"], total)
+        v["score"] = v["healthy"] * v["sure"]
+        rows.append((-round(v["score"], 2), -(c.get("ok", 0) / total if total else 0), p, v, c, total))
     out = ""
     for *_, p, v, c, total in sorted(rows, key=lambda r: r[:3]):  # score, then share ok, then name
         ok = c.get("ok", 0)
@@ -1387,11 +1391,12 @@ def providers(groups, history, days, fa):
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if v["ours"] else ""
         past = f'<span class="vh">{trend(history, days, v["keys"], fa)}</span>' if days else ""
         repos = len(v["keys"])
-        score = fa(round(v["score"])) if total else "—"
-        why = (f"سهمی از پاسخ‌ها که با ۹۵٪ اطمینان سالم است، از {fa(total)} بررسی"
-               f"{'؛ موردهای مخزنی که ناهمخوانی داشت سالم حساب نشد' if v['trusted'] < ok else ''}.")
+        num = lambda x: fa(f"{x:.1f}").replace(".", "٫")
+        score = num(v["score"]) if total else "—"
+        why = (f"{num(v['healthy'])} مخزن سالم × {fa(round(100 * v['sure']))}٪ اطمینان به سلامت {fa(total)} پاسخ"
+               f"{'؛ مخزنی که ناهمخوانی داشت حساب نشد' if v['trusted'] < ok else ''}.")
         share = ok / total if total else 0
-        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}" data-score="{v["score"]:.2f}" '
+        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}" data-score="{v["score"]:.3f}" '
                 f'data-pct="{share:.4f}" data-repos="{repos}" data-name="{html.escape(p)}">'
                 f'<span class="vn"><bdi dir="ltr">{html.escape(p)}</bdi>{tag}<small data-r="{fa(repos)} مخزن">{ecos}</small></span>'
                 f'<span class="vrepo"><b>{fa(repos)}</b><small>مخزن</small></span>'
@@ -1415,10 +1420,12 @@ def rank_note():
     ask = (f' معیار بهتری به نظرتان می‌رسد؟ در <a href="{html.escape(src)}/issues" rel="noopener">issueها</a> '
            f'پیشنهاد دهید یا pull request بفرستید تا اضافه شود؛ '
            f'<a href="{html.escape(src)}#how-providers-are-ranked" rel="noopener">توضیح کامل</a>.') if src else ""
-    return ('<p class="vfoot"><b>امتیاز چطور حساب می‌شود؟</b> امتیاز (۰ تا ۱۰۰) سهمی از پاسخ‌های ارائه‌دهنده است '
-            'که با ۹۵٪ اطمینان می‌توان گفت سالم است (کران پایین بازه‌ی ویلسون). پس هم درصد سالم مهم است و هم '
-            'تعداد بررسی‌ها: ۱۱ سالم از ۱۲ از ۱ سالم از ۱۶ بالاتر است، و ۹۴ از ۹۴ از ۳ از ۳. بی‌پاسخ و خطا سالم '
-            'حساب نمی‌شوند، و اگر مخزنی حتی یک مورد ناهمخوان بدهد، هیچ‌کدام از پاسخ‌هایش سالم حساب نمی‌شود. '
+    return ('<p class="vfoot"><b>امتیاز چطور حساب می‌شود؟</b> امتیاز = <b>تعداد مخزن‌های سالم</b> × '
+            '<b>اطمینان به سلامت پاسخ‌ها</b>. هر مخزنی که این‌جا بررسی می‌شود به اندازه‌ی سهم موردهای سالمش، '
+            'از ۰ تا ۱، در تعداد مخزن‌های سالم حساب می‌شود؛ پس پوشش بیشتر امتیاز بیشتری می‌آورد. اطمینان، سهمی از '
+            'همه‌ی پاسخ‌هاست که با ۹۵٪ اطمینان سالم است (کران پایین بازه‌ی ویلسون)؛ پس ارائه‌دهنده‌ای که مخزن زیاد '
+            'دارد ولی بیشترشان جواب درست نمی‌دهند بالا نمی‌آید. بی‌پاسخ و خطا سالم حساب نمی‌شوند و مخزنی که حتی '
+            'یک مورد ناهمخوان بدهد صفر می‌گیرد. عدد امتیاز تقریباً یعنی «چند مخزن کاملاً سالم و مطمئن». '
             f'همه‌ی ارائه‌دهنده‌ها، از جمله شکن، با همین فرمول سنجیده می‌شوند.{ask}</p>')
 
 
