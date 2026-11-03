@@ -235,11 +235,19 @@ class Registry:
         return data.get("token") or data["access_token"]
 
     def digest(self, repo, tag):
-        status, resp, _ = self.request("HEAD", f"/v2/{repo}/manifests/{tag}", repo)
-        value = resp.getheader("Docker-Content-Digest")
-        if status != 200 or not value:
-            raise RuntimeError(f"HTTP {status}")
-        return value
+        """The digest the registry gives the tag. Asked with HEAD first (no manifest body); a registry
+        that answers HEAD with an error or without Docker-Content-Digest is asked with GET, as `docker
+        pull` does, and without that header the digest is the sha256 of the manifest it served, which
+        is the digest a client pulling by tag takes."""
+        path = f"/v2/{repo}/manifests/{tag}"
+        status, resp, _ = self.request("HEAD", path, repo)
+        value = resp.getheader("Docker-Content-Digest") if status == 200 else None
+        if value:
+            return value
+        got, resp, body = self.request("GET", path, repo)
+        if got != 200:
+            raise RuntimeError(f"HTTP {got} (HEAD and GET)" if got == status else f"HTTP {got} (HEAD {status})")
+        return resp.getheader("Docker-Content-Digest") or "sha256:" + hashlib.sha256(body).hexdigest()
 
     def manifest_hashes_to(self, repo, digest):
         status, _, body = self.request("GET", f"/v2/{repo}/manifests/{digest}", repo)
