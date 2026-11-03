@@ -95,16 +95,13 @@ CI job; pin the commit of this repository you reviewed.
 The page groups mirrors by the registrable domain of their host (`mirror.example.ir` and
 `docker.example.ir` are one provider, `example.ir`); that says nothing about who runs them.
 
-- A provider's score is **healthy repositories × confidence**. Each repository checked here (one
-  mirror of one ecosystem) adds its share of ok items, 0 to 1, to the healthy repositories, so wider
-  coverage scores higher. The confidence is the lower bound of the 95% Wilson interval of the share
-  of ok answers over all its items, so many repositories that mostly fail do not rank high (one
-  repository at 11 of 12 beats five that answered 1 of 16). The number reads roughly as "how many
-  fully healthy repositories we can be sure of".
-- No answer and errors are not ok. A repository that served a single mismatch adds 0 and its items
-  count as not ok.
-- Ties go to the higher share of ok answers, then to the name. Visitors can also sort by share ok,
-  number of repositories or name; the formula is explained under the table.
+- A provider scores **one point per healthy repository, times that repository's history**. A
+  repository (one mirror of one ecosystem checked here) is healthy when none of its items mismatch
+  and at least 90% of them match the official source.
+- Its history is its share of ok answers over the last 30 days (no answer is not counted). Until two
+  weeks of history exist, everyone's history counts as full, so nobody loses for the time before it.
+- Ties go to fewer mismatches, then the higher share of ok answers, then the name. Visitors can also
+  sort by share ok, number of repositories or name; the formula is explained under the table.
 - Once two weeks of history exist, each provider also shows its last 30 days.
 
 The auditor is run by Shecan (audit.shecan.ir), which also runs mirrors that appear on the page.
@@ -167,11 +164,10 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 
 میرورها بر اساس دامنه‌ی میزبان گروه می‌شوند (`mirror.example.ir` و `docker.example.ir` یک ارائه‌دهنده‌اند)؛
 این چیزی درباره‌ی اینکه چه کسی آن‌ها را اداره می‌کند نمی‌گوید. هر مخزنی که این‌جا بررسی می‌شود (میرور
-یک اکوسیستم) بررسی می‌شود. امتیاز ارائه‌دهنده = **تعداد مخزن‌های سالم × اطمینان به سلامت پاسخ‌ها**. هر مخزن
-به اندازه‌ی سهم موردهای سالمش، از ۰ تا ۱، در تعداد مخزن‌های سالم حساب می‌شود؛ پس پوشش بیشتر امتیاز بیشتری
-می‌آورد. اطمینان، کران پایین بازه‌ی ۹۵٪ ویلسون برای سهم پاسخ‌های سالم است؛ پس ارائه‌دهنده‌ای که مخزن زیاد
-دارد ولی بیشترشان جواب درست نمی‌دهند بالا نمی‌آید. بی‌پاسخ و خطا سالم نیستند و مخزنی که حتی یک مورد ناهمخوان
-بدهد صفر می‌گیرد. در امتیاز برابر، سهم بیشتر پاسخ سالم و بعد نام جلو می‌افتد.
+یک اکوسیستم) بررسی می‌شود. هر **مخزن سالم** یک امتیاز دارد، ضرب در **سابقه‌اش**. مخزن وقتی سالم است که هیچ
+مورد ناهمخوانی نداشته باشد و دست‌کم ۹۰٪ موردهایش با منبع رسمی بخوانند. سابقه، سهم پاسخ‌های سالم همان مخزن در
+۳۰ روز گذشته است (بی‌پاسخ حساب نمی‌شود)؛ تا وقتی سابقه‌ی دو هفته جمع نشده، سابقه‌ی همه کامل حساب می‌شود.
+در امتیاز برابر، ناهمخوانی کمتر، سهم بیشتر پاسخ سالم و بعد نام جلو می‌افتد.
 
 این بازرس را شکن اجرا می‌کند و میرورهای شکن هم در همین صفحه هستند. شکن در این رتبه‌بندی هیچ امتیاز
 ویژه‌ای و هیچ برچسب جداگانه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب؛ اینکه صفحه را شکن اداره
