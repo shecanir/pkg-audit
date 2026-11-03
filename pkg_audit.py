@@ -35,10 +35,12 @@ networks, inside and outside Iran, and probe each PoP, and still pin digests in 
 Python 3.8+, standard library only.
 """
 import argparse
+import base64
 import contextlib
 import hashlib
 import html
 import http.client
+import io
 import ipaddress
 import json
 import os
@@ -51,6 +53,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -400,6 +403,7 @@ OFFICIAL = {
     "maven": "https://repo1.maven.org/maven2",
     "nodejs": "https://nodejs.org/dist",
     "golang": "https://dl.google.com/go",
+    "gomod": "https://proxy.golang.org",
     "gradle": "https://services.gradle.org/distributions",
     "rubygems": "https://index.rubygems.org",
     "helm": "https://get.helm.sh",
@@ -428,6 +432,7 @@ TITLES = {
     "maven": ("Maven", "sha1 فایل jar در برابر Maven Central"),
     "nodejs": ("Node.js", "فایل SHASUMS256.txt هر نسخه در برابر nodejs.org"),
     "golang": ("Go", "فایل sha256 هر نسخه در برابر dl.google.com"),
+    "gomod": ("Go modules", "هش h1 نسخه‌های ثابت ماژول‌ها در برابر proxy.golang.org"),
     "gradle": ("Gradle", "فایل sha256 هر distribution در برابر services.gradle.org"),
     "rubygems": ("RubyGems", "checksum هر gem در compact index رسمی rubygems.org"),
     "helm": ("Helm", "فایل sha256 باینری Helm در برابر get.helm.sh"),
@@ -451,15 +456,19 @@ TITLES = {
 }
 
 
-def get(url, accept="*/*", tries=3):
-    """GET with a few retries: a mirror or the official source resetting one connection is not a verdict."""
+def get(url, accept="*/*", tries=3, limit=None):
+    """GET with a few retries: a mirror or the official source resetting one connection is not a verdict.
+    With a limit, a body longer than that many bytes is an error (and is not read past the limit)."""
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "pkg-audit/1"})
     last = None
     opener = urllib.request.build_opener(TunnelHandler) if via_tunnel(url) else urllib.request.build_opener()
     for attempt in range(tries):
         try:
             with opener.open(req, timeout=45) as resp:
-                return resp.headers.get("Content-Type", ""), resp.read()
+                body = resp.read() if limit is None else resp.read(limit + 1)
+                if limit is not None and len(body) > limit:
+                    raise RuntimeError(f"answer longer than {limit} bytes")
+                return resp.headers.get("Content-Type", ""), body
         except urllib.error.HTTPError as exc:
             if exc.code < 500 and exc.code != 429:
                 raise RuntimeError(f"HTTP {exc.code}")
@@ -492,6 +501,40 @@ def cargo_path(name):
     return f"{n}/{name}" if n < 3 else f"3/{name[0]}/{name}" if n == 3 else f"{name[:2]}/{name[2:4]}/{name}"
 
 
+def go_escape(value):
+    """The module proxy protocol writes an upper-case letter as `!` and its lower-case form."""
+    return re.sub(r"[A-Z]", lambda match: "!" + match.group(0).lower(), value)
+
+
+# A module zip comes from the mirror under test, so it is not trusted to be small: the zip as served
+# and its files unpacked (a zip bomb is tens of kilobytes) are each held to this many bytes. `go`
+# itself refuses a module zip over 500 MiB; the small modules worth listing are far below this.
+GO_ZIP_LIMIT = 200 << 20
+
+
+def go_module_hash(body, limit=GO_ZIP_LIMIT):
+    """The `h1:` hash go.sum records for a module zip: sha256 of the sorted `sha256  name` lines of
+    its files, so it is the value `go` itself verifies (and does not depend on how the zip is packed).
+    Files are hashed a chunk at a time; more than `limit` bytes unpacked in all is an error."""
+    files, total = [], 0
+    with zipfile.ZipFile(io.BytesIO(body)) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            # The size the zip states, checked before anything is unpacked. zipfile never unpacks a
+            # file past its stated size (and fails its CRC check if there was more), so it holds.
+            total += info.file_size
+            if total > limit:
+                raise RuntimeError(f"module zip unpacks to more than {limit} bytes")
+            digest = hashlib.sha256()
+            with archive.open(info) as member:
+                for chunk in iter(lambda: member.read(1 << 20), b""):
+                    digest.update(chunk)
+            files.append((info.filename, digest.hexdigest()))
+    summary = "".join(f"{digest}  {name}\n" for name, digest in sorted(files))
+    return "h1:" + base64.b64encode(hashlib.sha256(summary.encode()).digest()).decode()
+
+
 def fetch_value(kind, base, item):
     if kind == "npm":
         name, _, version = item.rpartition("@")
@@ -515,6 +558,11 @@ def fetch_value(kind, base, item):
         if not re.fullmatch(r"[0-9a-f]{40}", value):  # an HTML page or error text is no answer
             raise RuntimeError("not a sha1 checksum")
         return value
+    if kind == "gomod":
+        module, _, version = item.rpartition("@")
+        _, body = get(f"{base}/{go_escape(module)}/@v/{go_escape(version)}.zip",  # the whole zip: its files are hashed
+                      limit=GO_ZIP_LIMIT)
+        return go_module_hash(body)
     if kind == "rubygems":
         name, _, version = item.rpartition("@")
         _, body = get(f"{base}/info/{name}")
@@ -1091,7 +1139,7 @@ def page(report):
 <h2>چه چیزی را نشان نمی‌دهد؟</h2>
 <ul><li>سبز یعنی بازرس ما جواب درست گرفته؛ نه اینکه همه‌ی کاربران و در همه‌ی زمان‌ها همین را می‌گیرند.</li>
 <li>حمله‌ای که فقط برای بعضی نشانی‌ها یا فقط هنگام قطعی اینترنت اجرا شود، با این بررسی دیده نمی‌شود.</li>
-<li>فایل بسته دانلود نمی‌شود؛ مقدار هش و checksumی سنجیده می‌شود که ابزار نصب از میرور می‌گیرد.</li>
+<li>فایل بسته دانلود نمی‌شود (جز ZIP ماژول‌های Go که برای محاسبه‌ی هش دانلود می‌شود)؛ مقدار هش و checksumی سنجیده می‌شود که ابزار نصب از میرور می‌گیرد.</li>
 <li>نام ستون‌ها فقط نشانی میزبان است؛ اینکه کدام شرکت اداره‌اش می‌کند را خودش باید تأیید کند.
 میرورهایی که بدون ثبت‌نام یا اعتبار پاسخ نمی‌دهند بررسی نشده‌اند.</li></ul>
 <h2>کد منبع</h2>
@@ -1121,7 +1169,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("images", help="file with one name:tag per line")
     ap.add_argument("mirrors", help="file with `name https://host [registry] [ip]` per line (Docker registries)")
-    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux, kali, opensuse)")
+    ap.add_argument("--packages", help="file with `kind item` per line (npm, pypi, cargo, maven, rubygems, nodejs, golang, gomod, gradle, helm, k8s, hashicorp, debian, ubuntu, almalinux, rocky, epel, fedora, centos, alpine, archlinux, kali, opensuse)")
     ap.add_argument("--targets", help="file with `kind name base-url` per line: the mirrors to check for those kinds")
     ap.add_argument("--brand", help="JSON file overriding the page branding (keys of DEFAULT_BRAND)")
     ap.add_argument("--max-seconds", type=int, default=1200,
