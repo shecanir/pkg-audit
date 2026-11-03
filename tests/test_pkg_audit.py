@@ -574,6 +574,8 @@ class History(unittest.TestCase):
         self.assertIn("<b>۱٫۵</b>", out)
         # bad also scores 1 (only its clean repository counts); a tie goes to the higher share ok
         self.assertLess(out.index('data-q="small.example"'), out.index('data-q="bad.example"'))
+        self.assertIn('data-score="1.500" data-pct="0.7500" data-repos="2"', out)  # what the sort buttons read
+        self.assertIn('data-vsort="score" aria-pressed="true"', out)
         self.assertNotIn('class="verdict', out)  # no banner without a mismatch
 
     def test_a_broken_file_is_kept_aside(self):

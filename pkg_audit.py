@@ -1104,7 +1104,7 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 .trend .pct{color:var(--muted);font-size:11.5px;white-space:nowrap;cursor:help}
 section.note.past ul{list-style:none;padding:0}section.note.past li{font-size:13.5px}
 .vendors{margin:18px 0 6px;background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
-.vtitle{padding:14px 20px 8px}.vtitle h2{font-size:17px;margin:0;line-height:1.5}.vtitle p{margin:0;color:var(--muted);font-size:12.5px}
+.vtitle{padding:14px 20px 8px;display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}.vtitle>div{flex:1 1 320px}.vtitle h2{font-size:17px;margin:0;line-height:1.5}.vtitle p{margin:0;color:var(--muted);font-size:12.5px}
 .vhead,.vrow{display:grid;grid-template-columns:minmax(0,1.3fr) 44px minmax(0,1.3fr) 112px minmax(0,1.1fr);gap:2px 16px;align-items:center;padding:6px 20px}
 .vendors.hist .vhead,.vendors.hist .vrow{grid-template-columns:minmax(0,1.3fr) 44px minmax(0,1.1fr) 112px minmax(0,1fr) minmax(0,1.2fr)}
 .vrepo{text-align:center}.vrepo b{display:block;font-size:15px;line-height:1.3}.vrepo small{color:var(--muted);font-size:11px}
@@ -1144,9 +1144,9 @@ nav.tabs{padding:12px 0}
 nav.tabs a{padding:5px 16px;transition:all .15s;box-shadow:var(--shadow)}
 nav.tabs a:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
 nav.tabs a.off{opacity:.35}
-.sort{flex:none;display:inline-flex;margin-inline-start:auto;border:1px solid var(--line);border-radius:999px;background:var(--card);padding:2px;box-shadow:var(--shadow)}
-.sort button{font:600 12.5px var(--font);color:var(--muted);background:transparent;border:0;border-radius:999px;padding:3px 12px;cursor:pointer}
-.sort button[aria-pressed=true]{background:var(--primary);color:#fff}
+.sort,.vsort{flex:none;display:inline-flex;margin-inline-start:auto;border:1px solid var(--line);border-radius:999px;background:var(--card);padding:2px;box-shadow:var(--shadow)}
+.sort button,.vsort button{font:600 12.5px var(--font);color:var(--muted);background:transparent;border:0;border-radius:999px;padding:3px 12px;cursor:pointer}
+.sort button[aria-pressed=true],.vsort button[aria-pressed=true]{background:var(--primary);color:#fff}
 h2.gt{font-size:23px;letter-spacing:-.015em;margin-top:38px}
 .list{border-radius:var(--r);box-shadow:var(--shadow)}
 details.m{transition:background .15s}details.m summary{padding:15px 20px}
@@ -1221,6 +1221,16 @@ function order(by){
   try{localStorage.setItem('sort',by)}catch(e){}}
 document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.sort button');if(b)order(b.dataset.sort)});
 try{if(localStorage.getItem('sort')==='name')order('name')}catch(e){}
+// provider table: score by default; the visitor can sort by share ok, repositories or name
+function vorder(by){var box=document.querySelector('.vrows');if(!box)return;
+  var f=function(r,k){return parseFloat(r.dataset[k])||0},keys={score:['score','pct'],pct:['pct','score'],repos:['repos','score']}[by];
+  [].slice.call(box.children).sort(function(a,b){
+    if(keys)for(var i=0;i<keys.length;i++){var d=f(b,keys[i])-f(a,keys[i]);if(Math.abs(d)>1e-9)return d}
+    return a.dataset.name<b.dataset.name?-1:a.dataset.name>b.dataset.name?1:0}).forEach(function(r){box.appendChild(r)});
+  [].forEach.call(document.querySelectorAll('.vsort button'),function(b){b.setAttribute('aria-pressed',b.dataset.vsort===by)});
+  try{localStorage.setItem('vsort',by)}catch(e){}}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.vsort button');if(b)vorder(b.dataset.vsort)});
+try{var vs=localStorage.getItem('vsort');if(vs&&vs!=='score')vorder(vs)}catch(e){}
 document.addEventListener('keydown',function(e){
   if(e.key==='/'&&document.activeElement!==q&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();q.focus()}
   else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}
@@ -1342,7 +1352,9 @@ def providers(groups, history, days, fa):
         score = fa(f"{v['score']:.1f}".removesuffix(".0")).replace(".", "٫")
         why = (f"جمع امتیاز {fa(repos)} مخزن: هر مخزن به اندازه‌ی سهم پاسخ‌های سالمش، از ۰ تا ۱؛ "
                f"مخزنی که حتی یک مورد ناهمخوان داشته باشد ۰.")
-        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}">'
+        share = ok / total if total else 0
+        out += (f'<button type="button" class="vrow" data-q="{html.escape(p)}" data-score="{v["score"]:.3f}" '
+                f'data-pct="{share:.4f}" data-repos="{repos}" data-name="{html.escape(p)}">'
                 f'<span class="vn"><bdi dir="ltr">{html.escape(p)}</bdi>{tag}<small data-r="{fa(repos)} مخزن">{ecos}</small></span>'
                 f'<span class="vrepo"><b>{fa(repos)}</b><small>مخزن</small></span>'
                 f'<span class="vbar" data-td="{parts}">{segs}</span>'
@@ -1351,9 +1363,12 @@ def providers(groups, history, days, fa):
                 f'<span class="vis{"" if rest else " clean"}">{rest or "همه سالم"}</span>{past}</button>')
     head = ('<div class="vhead"><span>ارائه‌دهنده</span><span>مخزن</span><span>پاسخ‌ها</span><span>امتیاز</span><span>بقیه</span>'
             + (f"<span>{fa(min(len(days), HISTORY_BAR_DAYS))} روز گذشته</span>" if days else "") + "</div>")
-    return (f'<section class="vendors{" hist" if days else ""}"><div class="vtitle"><h2>ارائه‌دهنده‌ها</h2>'
+    sort = "".join(f'<button type="button" data-vsort="{k}" aria-pressed="{str(k == "score").lower()}">{t}</button>'
+                   for k, t in [("score", "امتیاز"), ("pct", "درصد سالم"), ("repos", "تعداد مخزن"), ("name", "الفبا")])
+    return (f'<section class="vendors{" hist" if days else ""}"><div class="vtitle"><div><h2>ارائه‌دهنده‌ها</h2>'
             f'<p>میرورها بر اساس دامنه‌ی میزبان. امتیاز جمع امتیاز مخزن‌هایی است که این‌جا بررسی می‌شوند (هر مخزنِ کاملاً سالم ۱)؛ برای دیدن میرورهای هر کدام بزنید.</p></div>'
-            f'{head}{out}</section>')
+            f'<span class="vsort" role="group" aria-label="ترتیب ارائه‌دهنده‌ها">{sort}</span></div>'
+            f'{head}<div class="vrows">{out}</div></section>')
 
 
 def render_group(g, fa, history=None, days=()):
