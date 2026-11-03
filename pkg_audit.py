@@ -546,10 +546,16 @@ def go_module_hash(body, limit=GO_ZIP_LIMIT):
     return "h1:" + base64.b64encode(hashlib.sha256(summary.encode()).digest()).decode()
 
 
+# What the npm client itself asks for: the abbreviated document if the registry has it, else the full one.
+# Some mirrors (Nexus) answer 406 to a scoped package asked for the abbreviated document only, though npm
+# installs it from them; both documents carry `dist.integrity`.
+NPM_ACCEPT = "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*"
+
+
 def fetch_value(kind, base, item):
     if kind == "npm":
         name, _, version = item.rpartition("@")
-        _, body = get(f"{base}/{urllib.parse.quote(name, safe='@')}", "application/vnd.npm.install-v1+json")
+        _, body = get(f"{base}/{urllib.parse.quote(name, safe='@')}", NPM_ACCEPT)
         return json.loads(body)["versions"][version]["dist"]["integrity"]
     if kind == "pypi":
         name, _, version = item.partition("==")

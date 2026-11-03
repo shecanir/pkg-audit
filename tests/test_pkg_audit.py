@@ -135,6 +135,17 @@ class Values(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pa.go_module_hash(body, limit=500)  # the first file alone is over
 
+    def test_npm_asks_like_the_npm_client(self):
+        asked = []
+
+        def fake_get(url, accept="*/*", limit=None):
+            asked.append((url, accept))
+            return "application/json", b'{"versions": {"22.7.5": {"dist": {"integrity": "sha512-x"}}}}'
+        pa.get = fake_get
+        self.assertEqual(pa.fetch_value("npm", "https://m", "@types/node@22.7.5"), "sha512-x")
+        self.assertEqual(asked, [("https://m/@types%2Fnode",
+                                  "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8, */*")])
+
     def test_missing_version_is_an_error(self):
         pa.get = lambda url, accept="*/*": ("", b'{"vers":"1.0.0","cksum":"c1"}\n')
         with self.assertRaises(RuntimeError):
