@@ -45,13 +45,21 @@ class Tunnel(unittest.TestCase):
         else:
             os.environ["AUDIT_SOCKS"] = self.old_env
 
-    def test_marker_is_removed_and_remembered(self):
+    def test_every_mirror_uses_the_tunnel_unless_marked_direct(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "m.txt"
-            f.write_text("a https://one.example/x/ via=tunnel\nb https://two.example\nc https://3.example 1.2.3.4 via=tunnel # c\n")
+            f.write_text("a https://one.example/x/ via=tunnel\nb https://two.example\nc https://3.example 1.2.3.4 # c\n"
+                         "d https://four.example via=direct\ne https://five.example mcr.microsoft.com via=direct 1.2.3.5\n")
             rows = pa.read_list(f)
-        self.assertEqual(rows, [["a", "https://one.example/x/"], ["b", "https://two.example"], ["c", "https://3.example", "1.2.3.4"]])
-        self.assertEqual(pa.VIA_TUNNEL, {"https://one.example/x", "https://3.example"})
+        self.assertEqual(rows, [["a", "https://one.example/x/"], ["b", "https://two.example"], ["c", "https://3.example", "1.2.3.4"],
+                                ["d", "https://four.example"], ["e", "https://five.example", "mcr.microsoft.com", "1.2.3.5"]])
+        self.assertEqual(pa.VIA_TUNNEL, {"https://one.example/x", "https://two.example", "https://3.example"})
+
+    def test_an_official_source_never_uses_the_tunnel(self):
+        os.environ["AUDIT_SOCKS"] = f"127.0.0.1:{self.port}"
+        pa.VIA_TUNNEL.update({"https://registry.npmjs.org", "https://mirror.example"})
+        self.assertFalse(pa.via_tunnel("https://registry.npmjs.org/lodash"))
+        self.assertTrue(pa.via_tunnel("https://mirror.example/lodash"))
 
     def test_only_marked_mirrors_use_the_tunnel(self):
         os.environ["AUDIT_SOCKS"] = f"127.0.0.1:{self.port}"
