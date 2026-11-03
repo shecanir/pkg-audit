@@ -1,5 +1,6 @@
 # Pinned, immutable versions checked by scripts/mirror-audit.py: kind item
 # npm name@version, pypi name==version, cargo name@version, maven group:artifact:version,
+# gomod module@version (the module zip is downloaded and hashed),
 # nodejs/golang/gradle: a checksum file path under the official base.
 npm lodash@4.17.21
 npm react@18.3.1
@@ -50,3 +51,9 @@ hashicorp terraform/1.10.0/terraform_1.10.0_SHA256SUMS
 # debian/ubuntu: path of a small, immutable .deb under the mirror base
 debian pool/main/h/hello/hello_2.10-3_amd64.deb
 ubuntu pool/main/h/hello/hello_2.10-3build2_amd64.deb
+# alpine: path of a small, immutable file under the mirror base; a package of an end-of-life branch
+# is never replaced (and package-only mirrors such as repo.hmirror.ir/apk have no releases/ tree)
+alpine v3.16/main/x86_64/alpine-keys-2.4-r1.apk
+gomod golang.org/x/net@v0.30.0
+gomod github.com/google/uuid@v1.6.0
+gomod github.com/stretchr/testify@v1.9.0

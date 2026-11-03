@@ -22,11 +22,12 @@ network.
 | Cargo | `cksum` in the sparse index |
 | Maven | `.jar.sha1` |
 | RubyGems | `checksum` in the compact index |
+| Go modules | the `h1:` hash (as in `go.sum`) of a pinned version, computed from the module zip |
 | Node.js, Go, Gradle, Helm, kubectl, HashiCorp | the checksum file of a pinned release |
 
 Packages are pinned to a version, so metadata is immutable and any difference is a `mismatch`.
-Files themselves are not downloaded: equal hashes mean equal content, and a client verifies the
-file against that hash.
+Files themselves are not downloaded (except Go module zips, which are hashed here): equal hashes
+mean equal content, and a client verifies the file against that hash.
 
 ## Use
 
@@ -122,7 +123,7 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 - ایمیج Docker با رجیستری رسمی خودش مقایسه می‌شود: Docker Hub، یا رجیستری‌ای که نام ایمیج با آن شروع
   می‌شود (`mcr.microsoft.com/...`، `gcr.io/...`، `quay.io/...`). میرور هر رجیستری در `docker-mirrors.txt`
   با ستون سوم مشخص می‌شود و فقط روی ایمیج‌های همان رجیستری سنجیده می‌شود.
-- بسته‌ها روی نسخه‌ی ثابت سنجیده می‌شوند، پس هر تفاوتی `mismatch` است. فایل‌ها دانلود نمی‌شوند.
+- بسته‌ها روی نسخه‌ی ثابت سنجیده می‌شوند، پس هر تفاوتی `mismatch` است. فایل‌ها دانلود نمی‌شوند، جز ZIP ماژول‌های Go که برای محاسبه‌ی هش دانلود می‌شود.
 - سبز یعنی بازرس جواب درست گرفته، نه اینکه همه‌ی کاربران همیشه همین را می‌گیرند. حمله‌ی مخصوص بعضی
   نشانی‌ها یا زمان قطعی اینترنت دیده نمی‌شود.
 - برای پروژه‌های حساس هش را خودتان ثابت کنید (lockfile با هش، `--require-hashes`، `image@sha256:…`).
