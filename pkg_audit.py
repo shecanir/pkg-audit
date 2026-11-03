@@ -1139,7 +1139,9 @@ padding:13px 48px 13px 20px;box-shadow:var(--shadow);outline:none;transition:bor
 .search svg{position:absolute;inset-inline-start:auto;right:18px;top:50%;transform:translateY(-50%);width:18px;height:18px;color:var(--muted);pointer-events:none}
 .search kbd{position:absolute;left:16px;top:50%;transform:translateY(-50%);font:600 11.5px ui-monospace,Menlo,monospace;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 7px}
 .search input:not(:placeholder-shown)~kbd{display:none}
-#sres{color:var(--muted);font-size:13px;min-height:22px;margin:8px 4px 0}
+#sres{color:var(--muted);font-size:13px;min-height:22px;flex:1 1 auto}
+.tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin:10px 4px 0}
+.lsort{display:inline-flex;align-items:center;gap:8px;margin-inline-start:auto;color:var(--muted);font-size:12.5px}
 nav.tabs{padding:12px 0}
 nav.tabs a{padding:5px 16px;transition:all .15s;box-shadow:var(--shadow)}
 nav.tabs a:hover{background:var(--primary);color:#fff;border-color:var(--primary)}
@@ -1486,9 +1488,10 @@ def page(report, history=None):
     else:
         verdict = ""
     nav = "".join(f'<a href="#{g["id"]}">{html.escape(g["title"])}</a>' for g in groups)
-    nav += ('<span class="sort" role="group" aria-label="ترتیب">'
+    # the mirrors' sort sits by the search results, not at the far end of the scrolling tabs
+    sort = ('<span class="lsort"><span aria-hidden="true">ترتیب میرورها</span><span class="sort" role="group" aria-label="ترتیب میرورها">'
             '<button type="button" data-sort="score" aria-pressed="true">بیشترین امتیاز</button>'
-            '<button type="button" data-sort="name" aria-pressed="false">الفبا</button></span>')
+            '<button type="button" data-sort="name" aria-pressed="false">الفبا</button></span></span>')
     sections = "".join(render_group(g, fa, history, days) for g in groups)
     past = mismatch_log(history, days, fa)
 
@@ -1527,7 +1530,7 @@ def page(report, history=None):
 {providers(groups, history, days, fa)}
 <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
 <input id="q" type="search" placeholder="جست‌وجو: liara، npm، lodash…" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
-<div id="sres" role="status" aria-live="polite"></div>
+<div class="tools"><div id="sres" role="status" aria-live="polite"></div>{sort}</div>
 <nav class="tabs">{nav}</nav>
 {sections}
 {f'<section class="note past">{past}</section>' if past else ""}
