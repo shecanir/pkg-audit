@@ -853,12 +853,12 @@ BRAND = dict(DEFAULT_BRAND)
 CSS = """
 @font-face{font-family:Vazirmatn;src:url(/vazirmatn.woff2) format('woff2');font-weight:100 900;font-display:swap}
 :root{--bg:#f4f1ea;--card:#fff;--fg:#0e2218;--muted:#5d6d63;--line:#e2ddd0;--primary:#157a4a;
---ok:#1f9d5c;--stale:#d19a1a;--bad:#d6334a;--err:#98a39c;--miss:#2f6fd0;--fail:#8a5cc7;--missbg:#2f6fd01c;--failbg:#8a5cc71f;
---okbg:#1f9d5c1c;--stalebg:#d19a1a24;--badbg:#d6334a1f;--errbg:#98a39c26;
+--ok:#1f9d5c;--stale:#c99a00;--bad:#d6334a;--err:#97a29b;--miss:#e2581c;--fail:#5f6b64;--missbg:#e2581c1f;--failbg:#5f6b641f;
+--okbg:#1f9d5c1c;--stalebg:#e0a8002a;--badbg:#d6334a1f;--errbg:#97a29b22;
 --font:Vazirmatn,Tahoma,'Segoe UI',system-ui,sans-serif}
 @media(prefers-color-scheme:dark){:root{--bg:#0b1411;--card:#111c18;--fg:#e4ede7;--muted:#8ea196;--line:#1d2d26;
---primary:#6fd69a;--ok:#4ccf86;--stale:#e6b640;--bad:#ff6f83;--err:#6f8178;--miss:#7aa7ff;--fail:#b494ef;--missbg:#7aa7ff22;--failbg:#b494ef22;
---okbg:#4ccf8622;--stalebg:#e6b64024;--badbg:#ff6f8326;--errbg:#6f817826}}
+--primary:#6fd69a;--ok:#4ccf86;--stale:#e8c048;--bad:#ff6f83;--err:#6f8178;--miss:#ff9550;--fail:#a3b0a8;--missbg:#ff955024;--failbg:#a3b0a81f;
+--okbg:#4ccf8622;--stalebg:#e8c04824;--badbg:#ff6f8326;--errbg:#6f81781f}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.8 var(--font)}
 a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
@@ -908,7 +908,7 @@ details.m[open] summary:after{transform:translateY(2px) rotate(135deg)}
 .score.good{color:var(--ok)}.score.warn{color:var(--stale)}.score.alert{color:var(--bad)}.score.none{color:var(--err)}
 .strip{display:flex;flex-wrap:wrap;gap:3px}
 .sq{width:14px;height:14px;border-radius:4px;background:var(--ok);display:block}
-.sq.stale{background:var(--stale)}.sq.bad{background:var(--bad)}.sq.err{background:var(--err)}
+.sq.stale{background:var(--stale)}.sq.bad{background:var(--bad)}.sq.err{background:transparent;border:2px solid var(--err)}
 .sq.miss{background:var(--miss)}.sq.fail{background:var(--fail)}
 .items{margin:0;padding:2px 18px 12px;list-style:none;border-top:1px dashed var(--line)}
 .items li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
@@ -918,8 +918,6 @@ details.m[open] summary:after{transform:translateY(2px) rotate(135deg)}
 .b.ok{color:var(--ok);background:var(--okbg)}.b.stale{color:var(--stale);background:var(--stalebg)}
 .b.bad{color:var(--bad);background:var(--badbg)}.b.err{color:var(--err);background:var(--errbg)}
 .b.miss{color:var(--miss);background:var(--missbg)}.b.fail{color:var(--fail);background:var(--failbg)}
-.legend{display:flex;flex-wrap:wrap;gap:8px 22px;margin:22px 0 6px;color:var(--muted);font-size:13px}
-.legend div{display:flex;align-items:center;gap:8px}
 section.note{margin:26px 0;padding:6px 0}
 section.note h2{font-size:17px;margin:18px 0 4px}section.note p,section.note li{color:var(--muted);margin:4px 0}
 section.note ul{padding-inline-start:20px;margin:6px 0}
@@ -946,6 +944,20 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 @media(max-width:900px){.nums{grid-template-columns:repeat(3,1fr)}}
 .nums span{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;box-shadow:var(--shadow);font-size:12.5px;line-height:1.5}
 .nums b:first-child{display:block;font-size:24px;line-height:1.3;letter-spacing:-.01em}
+.nums .t{display:flex;flex-direction:column;gap:2px;cursor:help}
+.nums .t em{display:flex;align-items:center;gap:7px;font-style:normal;font-weight:700;font-size:13px;color:var(--fg)}
+.nums .t em .sq{flex:none;width:10px;height:10px;box-shadow:none}.nums .t em .sq.err{border-width:1.5px}
+.nums .t small{color:var(--muted);font-size:12px;line-height:1.5}
+.nums .t.zero{opacity:.55}.nums .t.zero b:first-child{color:var(--muted)}
+.nums .t.hot.bad{border-color:color-mix(in srgb,var(--bad) 45%,var(--line));background:color-mix(in srgb,var(--badbg) 100%,var(--card))}
+.nums .t.hot.bad b:first-child{color:var(--bad)}
+.tip{position:fixed;z-index:50;top:0;left:0;max-width:min(360px,calc(100vw - 24px));background:var(--card);color:var(--fg);
+border:1px solid var(--line);border-radius:12px;padding:8px 12px;font-size:12.5px;line-height:1.65;
+box-shadow:0 12px 32px -12px rgba(0,0,0,.35);pointer-events:none;opacity:0;transition:opacity .12s}
+.tip.on{opacity:1}
+.tip .tt{display:block;direction:ltr;text-align:left;font:600 12.5px ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.tip .tl{display:flex;align-items:center;gap:7px;font-weight:700}.tip .tl .sq{width:9px;height:9px;box-shadow:none}
+.tip .td{display:block;color:var(--muted);overflow-wrap:anywhere}.tip .td[dir=ltr]{text-align:left;font:12px ui-monospace,Menlo,Consolas,monospace}
 .search{position:relative;margin:18px 0 4px}
 .search input{width:100%;font:500 15px var(--font);color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:999px;
 padding:13px 48px 13px 20px;box-shadow:var(--shadow);outline:none;transition:border-color .15s,box-shadow .15s}
@@ -1046,6 +1058,24 @@ def checked_label(iso):
             + (" · قدیمی" if old else "")), old
 
 
+TIP = r'''<script>
+(function(){var tip=document.createElement('div'),cur=null;tip.className='tip';tip.setAttribute('aria-hidden','true');document.body.appendChild(tip);
+function line(cls,text,ltr){var s=document.createElement('span');s.className=cls;s.textContent=text;if(ltr)s.dir='ltr';return s}
+function show(el){var d=el.dataset;if(!d.tt&&!d.td){hide();return}cur=el;tip.textContent='';
+  if(d.tt)tip.appendChild(line('tt',d.tt));
+  if(d.tl){var l=line('tl',d.tl),q=document.createElement('i');q.className='sq '+(d.tc==='ok'?'':d.tc);l.prepend(q);l.style.color='var(--'+d.tc+')';tip.appendChild(l)}
+  if(d.td)tip.appendChild(line('td',d.td,!/[\u0600-\u06FF]/.test(d.td)));
+  var r=el.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight,x=r.left+r.width/2-w/2,y=r.top-h-8;
+  if(y<8)y=r.bottom+8;x=Math.max(8,Math.min(x,innerWidth-w-8));
+  tip.style.transform='translate('+Math.round(x)+'px,'+Math.round(y)+'px)';tip.classList.add('on')}
+function hide(){cur=null;tip.classList.remove('on')}
+function pick(e){return e.target.closest&&e.target.closest('[data-tt],[data-td]')}
+document.addEventListener('pointerover',function(e){var el=pick(e);if(el!==cur)el?show(el):hide()});
+document.addEventListener('focusin',function(e){var el=pick(e);el?show(el):hide()});
+document.addEventListener('focusout',hide);addEventListener('scroll',hide,{passive:true});
+})();
+</script>'''
+
 SCRIPT = r'''<script>
 (function(){var CD=__MIN__*60000;
 function fa(n){return String(n).replace(/\d/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'[d]})}
@@ -1097,8 +1127,9 @@ def render_group(g, fa):
         strip = ""
         for ref in refs:
             cls = BADGE[row_of(rows, ref)["verdict"]][0]
-            tip = html.escape(f'{ref}: {BADGE[row_of(rows, ref)["verdict"]][2]} {row_of(rows, ref)["detail"]}'.strip())
-            strip += f'<i class="sq {"" if cls == "ok" else cls}" title="{tip}"></i>'
+            label, detail = BADGE[row_of(rows, ref)["verdict"]][2], row_of(rows, ref)["detail"]
+            strip += (f'<i class="sq {"" if cls == "ok" else cls}" role="img" aria-label="{html.escape(f"{ref}: {label}")}" '
+                      f'data-tt="{html.escape(ref)}" data-tc="{cls}" data-tl="{label}" data-td="{html.escape(detail)}"></i>')
         items = ""
         if BRAND["recheck_minutes"] > 0:
             items += (f'<li class="req"><button type="button" class="re" data-g="{html.escape(g["id"])}" '
@@ -1107,8 +1138,9 @@ def render_group(g, fa):
                       f'<span class="rs" aria-live="polite"></span></li>')
         for ref in sorted(refs, key=lambda r: row_of(rows, r)["verdict"] == "ok"):  # problems first
             cls, icon, label = BADGE[row_of(rows, ref)["verdict"]]
-            tip = html.escape(((row_of(rows, ref)["value"] or "") + " " + row_of(rows, ref)["detail"]).strip())
-            items += (f'<li><code>{html.escape(ref)}</code><span class="b {cls}" title="{tip}">'
+            value, detail = row_of(rows, ref)["value"] or "", row_of(rows, ref)["detail"]
+            items += (f'<li><code>{html.escape(ref)}</code><span class="b {cls}" data-tt="{html.escape(value)}" '
+                      f'data-td="{html.escape(detail)}">'
                       f'<span aria-hidden="true">{icon}</span>{label}</span></li>')
         opened = " open" if bad else ""
         out += (f'<details class="m"{opened} {key}><summary><div class="who"><span class="host">{host}</span>{tag}<span class="when{" old" if seen[1] else ""}">{seen[0]}{" · در صف بررسی" if m.get("queued") and m.get("checked_at") else ""}</span></div>'
@@ -1137,14 +1169,20 @@ def page(report):
     except ValueError:
         when = html.escape(report["generated"])
     fa = lambda n: str(n).translate(FA_DIGITS)
-    legend = "".join(
-        f'<div><span class="b {c}"><span aria-hidden="true">{i}</span>{l}</span>{t}</div>' for c, i, l, t in [
-            ("ok", "✓", "سالم", "همان مقداری که منبع رسمی می‌دهد"),
-            ("stale", "◷", "قدیمی", "فقط Docker: تگ جابه‌جا شده و میرور نسخه‌ی قبلی را دارد؛ حمله نیست"),
-            ("bad", "✕", "ناهمخوان", "مقداری که منبع رسمی ندارد؛ باید بررسی شود"),
-            ("miss", "∅", "پیدا نشد (۴۰۴)", "میرور جواب داد ولی این ایمیج یا بسته را ندارد"),
-            ("err", "○", "در دسترس نیست", "از میرور جوابی نیامد: تایم‌اوت یا قطع اتصال"),
-            ("fail", "!", "خطا", "میرور جواب داد ولی با خطای دیگر (مثلاً ۴۰۳ یا ۵۰۰) یا پاسخ نامعتبر")])
+    tiles = "".join(
+        f'<span class="t {c}{" zero" if not counts[v] and v != "ok" else " hot" if counts[v] else ""}" tabindex="0" '
+        f'data-tc="{c}" data-tl="{BADGE[v][2]}" data-td="{t}"><b>{fa(counts[v])}</b>'
+        f'<em><i class="sq {"" if c == "ok" else c}" aria-hidden="true"></i>{BADGE[v][2]}</em><small>{s}</small></span>'
+        for v, c, s, t in [
+            ("ok", "ok", f"از {fa(total)} پاسخ، همان مقدار منبع رسمی", "میرور همان مقداری را داد که منبع رسمی می‌دهد."),
+            ("mismatch", "bad", "مقداری که منبع رسمی ندارد",
+             "میرور مقداری داد که منبع رسمی هیچ‌وقت نداده؛ باید بررسی شود."),
+            ("stale", "stale", "نسخه‌ی قبلیِ یک تگ Docker",
+             "فقط در Docker: تگ در منبع رسمی جابه‌جا شده و میرور هنوز نسخه‌ی قبلی را دارد. حمله نیست."),
+            ("missing", "miss", "میرور این مورد را ندارد", "میرور جواب داد ولی این ایمیج یا بسته را ندارد."),
+            ("error", "fail", "۴۰۳، ۵۰۰ یا پاسخ نامعتبر",
+             "میرور جواب داد ولی با خطای دیگری (مثلاً ۴۰۳ یا ۵۰۰) یا پاسخی که خوانده نشد."),
+            ("unreachable", "err", "تایم‌اوت یا قطع اتصال", "از میرور جوابی نیامد: تایم‌اوت یا قطع اتصال.")])
     def who(verdict, limit=6):
         """`host (ecosystem): item, item` lines for every mirror with that verdict, worst first."""
         found = {}
@@ -1220,18 +1258,14 @@ def page(report):
 <div class="brand">{html.escape(BRAND["name"])}<small>{html.escape(BRAND["tagline"])}</small></div>{src_link}</header>
 <h1>پایش <span>میرورها</span></h1>
 <p class="lead">بسته‌ها و ایمیج‌های پرکاربرد را از هر میرور می‌پرسیم و با پاسخ منبع رسمی مقایسه می‌کنیم،
-از سروری مستقل از میرورها. آخرین بررسی: {when}. هر ساعت تکرار می‌شود.</p>
+از سروری مستقل از میرورها: {fa(len(seen))} میزبان در {fa(len(groups))} اکوسیستم. آخرین بررسی: {when}. هر ساعت تکرار می‌شود.</p>
 <div class="verdict {vclass}">{verdict_body}</div>
-<div class="nums"><span><b>{fa(len(seen))}</b> میزبان در <b>{fa(len(groups))}</b> اکوسیستم</span>
-<span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
-<span><b>{fa(counts["missing"])}</b> پیدا نشد (۴۰۴)</span>
-<span><b>{fa(counts["unreachable"])}</b> در دسترس نیست</span><span><b>{fa(counts["error"])}</b> خطا</span></div>
+<div class="nums">{tiles}</div>
 <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
 <input id="q" type="search" placeholder="جست‌وجو: liara، npm، lodash…" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
 <div id="sres" role="status" aria-live="polite"></div>
 <nav class="tabs">{nav}</nav>
 {sections}
-<div class="legend">{legend}</div>
 <section class="note"><h2>این صفحه چه چیزی را نشان می‌دهد؟</h2>
 <p>برای هر اکوسیستم، همان داده‌ای را از میرور و از منبع رسمی می‌گیریم که ابزار نصب به آن اعتماد می‌کند
 (digest در Docker، هش در npm و PyPI، cksum در Cargo، sha1 در Maven، فایل checksum نصب‌کننده‌ها) و مقایسه می‌کنیم.
@@ -1256,7 +1290,7 @@ def page(report):
 <li><a href="https://github.com/rastikerdar/vazirmatn" rel="noopener" dir="ltr">Vazirmatn</a>، اثر زنده‌یاد صابر راستی‌کردار (مجوز SIL Open Font License 1.1): فونت این صفحه.</li>
 {credits}</ul></section>
 <footer>{BRAND["footer_html"]}</footer>
-</div>{SEARCH}{script}</body></html>"""
+</div>{SEARCH}{TIP}{script}</body></html>"""
 
 
 def write_atomic(path, text):
