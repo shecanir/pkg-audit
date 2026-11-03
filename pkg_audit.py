@@ -784,6 +784,29 @@ LEGACY_UNCHECKED = ("skipped: the run's time budget", "no answer before the run'
 HISTORY_DAYS = 90  # daily counts, and changes other than a mismatch, are kept this long
 
 
+def jalali(gy, gm, gd):
+    """Gregorian date -> (year, month, day) of the Persian (solar hijri) calendar."""
+    g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334]
+    gy2 = gy + 1 if gm > 2 else gy
+    days = 355666 + 365 * gy + (gy2 + 3) // 4 - (gy2 + 99) // 100 + (gy2 + 399) // 400 + gd + g_d_m[gm - 1]
+    jy = -1595 + 33 * (days // 12053)
+    days %= 12053
+    jy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        jy += (days - 1) // 365
+        days = (days - 1) % 365
+    if days < 186:
+        return jy, 1 + days // 31, 1 + days % 31
+    return jy, 7 + (days - 186) // 30, 1 + (days - 186) % 30
+
+
+def fa_day(day):
+    """'2026-11-03' (a Tehran date) -> '۱۴۰۵/۰۸/۱۲'."""
+    y, m, d = jalali(*map(int, day.split("-")))
+    return f"{y}/{m:02}/{d:02}".translate(FA_DIGITS)
+
+
 def tehran_day(iso):
     t = datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
     return t.astimezone(timezone(timedelta(hours=3, minutes=30))).strftime("%Y-%m-%d")
@@ -888,7 +911,7 @@ def trend(history, days, key, fa):
                 c[verdict] = c.get(verdict, 0) + n
         tone, a = day_tone(c)
         ok, answered, silent = ok + c.get("ok", 0), answered + a, silent + c.get("unreachable", 0)
-        date = d.replace("-", "/").translate(FA_DIGITS)
+        date = fa_day(d)
         text = (f"{fa(c.get('ok', 0))} سالم از {fa(a)} پاسخ"
                 + (f"، {fa(c['mismatch'])} ناهمخوان" if c.get("mismatch") else "")
                 + (f"، {fa(c['unreachable'])} بی‌پاسخ" if c.get("unreachable") else "")) if c else "بررسی نشد"
@@ -905,7 +928,7 @@ def mismatch_log(history, days, fa):
     if not days:
         return ""
     seen = [e for e in history.get("events", []) if e["to"] == "mismatch"]
-    since = days[0].replace("-", "/").translate(FA_DIGITS)
+    since = fa_day(days[0])
     if not seen:
         return (f'<h2>سابقه‌ی ناهمخوانی‌ها</h2><p>از {since} ({fa(len(days))} روز) تا امروز در هیچ میروری '
                 f'ناهمخوانی دیده نشده است.</p>')
@@ -916,8 +939,8 @@ def mismatch_log(history, days, fa):
         fixed = next((x["at"] for x in history["events"] if x["at"] > e["at"] and x["group"] == e["group"]
                       and x["mirror"] == e["mirror"] and x["item"] == e["item"] and x["from"] == "mismatch"), None)
         rows += (f'<li><bdi dir="ltr">{html.escape(host)}</bdi> · <bdi dir="ltr">{html.escape(e["item"])}</bdi> · '
-                 f'{tehran_day(e["at"]).replace("-", "/").translate(FA_DIGITS)}'
-                 f'{"، رفع شد " + tehran_day(fixed).replace("-", "/").translate(FA_DIGITS) if fixed else "، هنوز ناهمخوان"}</li>')
+                 f'{fa_day(tehran_day(e["at"]))}'
+                 f'{"، رفع شد " + fa_day(tehran_day(fixed)) if fixed else "، هنوز ناهمخوان"}</li>')
     return (f'<h2>سابقه‌ی ناهمخوانی‌ها</h2><p>هر باری که از {since} تا امروز میروری مقداری داد که منبع رسمی '
             f'نداشت، این‌جا می‌ماند؛ حتی اگر بعداً درست شده باشد:</p><ul>{rows}</ul>')
 
@@ -1011,7 +1034,7 @@ header .src{margin-inline-start:auto;direction:ltr;font:600 12.5px ui-monospace,
 header .src:hover{border-color:var(--primary);color:var(--primary);text-decoration:none}
 h1{font-size:clamp(26px,5vw,40px);line-height:1.35;margin:22px 0 8px;font-weight:800;letter-spacing:-.01em}
 h1 span{color:var(--primary)}
-.lead{color:var(--muted);margin:0 0 20px;max-width:64ch}
+.lead{color:var(--muted);margin:0 0 20px}
 .verdict{display:flex;align-items:center;gap:14px;border-radius:16px;padding:14px 18px;margin-bottom:18px;font-weight:600}
 .verdict.good{background:var(--okbg);color:var(--ok)}.verdict.warn{background:var(--stalebg);color:var(--stale)}
 .verdict.alert{background:var(--badbg);color:var(--bad)}
@@ -1435,7 +1458,7 @@ def page(report, history=None):
     try:
         stamp = datetime.strptime(report["generated"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         tehran = stamp.astimezone(timezone(timedelta(hours=3, minutes=30)))
-        when = tehran.strftime("%Y/%m/%d ساعت %H:%M").translate(FA_DIGITS) + " به وقت تهران"
+        when = fa_day(tehran.strftime("%Y-%m-%d")) + tehran.strftime(" ساعت %H:%M").translate(FA_DIGITS) + " به وقت تهران"
     except ValueError:
         when = html.escape(report["generated"])
     fa = lambda n: str(n).translate(FA_DIGITS)
