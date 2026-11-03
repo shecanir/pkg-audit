@@ -28,3 +28,6 @@ npm   repo.hmirror.ir          https://repo.hmirror.ir/npm
 pypi  repo.hmirror.ir          https://repo.hmirror.ir/python
 maven repo.hmirror.ir          https://repo.hmirror.ir/maven
 gomod  repo.hmirror.ir          https://repo.hmirror.ir/go
+alpine repo.hmirror.ir         https://repo.hmirror.ir/apk
+debian repo.hmirror.ir         https://repo.hmirror.ir/debian
+ubuntu repo.hmirror.ir         https://repo.hmirror.ir/ubuntu
