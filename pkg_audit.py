@@ -214,14 +214,17 @@ class Registry:
             finally:
                 conn.close()
 
-    @staticmethod
-    def token(challenge, repo):
+    def token(self, challenge, repo):
+        """A pull token from the realm the registry names. For a mirror asked through the tunnel the
+        token is asked through it too: a mirror that answers only from inside Iran usually issues its
+        tokens from its own host as well."""
         if not challenge.lower().startswith("bearer "):
             raise RuntimeError("401 without a Bearer challenge")
         fields = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
         query = urllib.parse.urlencode({"service": fields.get("service", ""),
                                         "scope": f"repository:{repo}:pull"})
-        with urllib.request.urlopen(f"{fields['realm']}?{query}", timeout=30) as resp:
+        opener = urllib.request.build_opener(TunnelHandler) if self.tunnel else urllib.request.build_opener()
+        with opener.open(f"{fields['realm']}?{query}", timeout=30) as resp:
             data = json.load(resp)
         return data.get("token") or data["access_token"]
 

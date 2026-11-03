@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline tests for the SOCKS5 tunnel and the `via=tunnel` marker. Run: python3 tests/test_tunnel.py"""
+import io
 import os
 import sys
 import tempfile
@@ -65,6 +66,33 @@ class Tunnel(unittest.TestCase):
         self.assertFalse(pa.via_tunnel("https://one.example/a"))
         os.environ["AUDIT_SOCKS"] = "nonsense"
         self.assertFalse(pa.via_tunnel("https://one.example/a"))
+
+    def test_a_tunnelled_registry_asks_for_its_token_through_the_tunnel(self):
+        os.environ["AUDIT_SOCKS"] = f"127.0.0.1:{self.port}"
+        pa.VIA_TUNNEL.add("https://hub.mirror.test")
+        opened = []
+
+        class Answer(io.BytesIO):
+            def __enter__(self):
+                return self
+
+        class Opener:
+            def __init__(self, handlers):
+                self.handlers = handlers
+
+            def open(self, url, timeout):
+                opened.append((self.handlers, url))
+                return Answer(b'{"token": "t"}')
+
+        challenge = 'Bearer realm="https://hub.mirror.test/token",service="registry"'
+        real, pa.urllib.request.build_opener = pa.urllib.request.build_opener, lambda *handlers: Opener(handlers)
+        try:
+            self.assertEqual(pa.Registry("https://hub.mirror.test").token(challenge, "library/alpine"), "t")
+            self.assertEqual(pa.Registry("https://other.mirror.test").token(challenge, "library/alpine"), "t")
+        finally:
+            pa.urllib.request.build_opener = real
+        self.assertEqual([handlers for handlers, _ in opened], [(pa.TunnelHandler,), ()])
+        self.assertIn("scope=repository%3Alibrary%2Falpine%3Apull", opened[0][1])
 
     def test_connect_by_name_through_the_proxy(self):
         sock = pa.socks_connect(("127.0.0.1", self.port), "mirror.test", 80, 5)
