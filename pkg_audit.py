@@ -340,16 +340,41 @@ def keep_or_new(prior, name, url, ip, active):
     return {"url": url, "ip": ip, "rows": {}, "checked_at": now_iso() if active else None}
 
 
+REGISTRY_TITLES = {
+    HUB_HOST: "Docker Hub",
+    "mcr.microsoft.com": "Microsoft (MCR)",
+    "gcr.io": "Google (GCR)",
+    "ghcr.io": "GitHub (GHCR)",
+    "quay.io": "Quay",
+    "docker.elastic.co": "Elastic",
+    "registry.k8s.io": "Kubernetes (registry.k8s.io)",
+}
+
+
+def docker_group_id(upstream):
+    """The report and page id of the group of one official registry. Docker Hub keeps `docker`, the
+    id of the single Docker group of earlier versions, so its state, queue entries and links stay."""
+    return "docker" if upstream == HUB_HOST else "docker-" + re.sub(r"[^a-z0-9]+", "-", upstream.lower()).strip("-")
+
+
 def docker_group(refs, mirrors, active, prior_group=None):
     """The group, the jobs that ask the official registries (one per registry with a mirror checked
     now, so they are asked at the same time) and a function returning the mirror jobs once their
     answers are in. `mirrors` are (name, URL, registry, ip); each is compared on the images that
-    are on its registry."""
+    are on its registry. main() makes one group per registry, so a mirror of MCR is not listed with
+    the Docker Hub mirrors; a group of mirrors of several registries is still possible."""
     official, failed = {}, {}
     registries = {upstream: Registry(f"https://{upstream}") for _, _, upstream, _ in mirrors}
     items = {upstream: [ref for ref in refs if split(ref)[0] == upstream] for upstream in registries}
-    group = {"id": "docker", "title": "Docker", "items": [ref for ref in refs if split(ref)[0] in registries],
-             "mirrors": {}, "note": "digest هر تگ در برابر رجیستری رسمی همان ایمیج"}
+    if len(registries) == 1:
+        (upstream,) = registries
+        label = "Docker Hub" if upstream == HUB_HOST else upstream
+        gid, title, note = (docker_group_id(upstream), REGISTRY_TITLES.get(upstream, upstream),
+                            f"digest هر تگ در برابر {label}")
+    else:
+        gid, title, note = "docker", "Docker", "digest هر تگ در برابر رجیستری رسمی همان ایمیج"
+    group = {"id": gid, "title": title, "items": [ref for ref in refs if split(ref)[0] in registries],
+             "mirrors": {}, "note": note}
     prior = (prior_group or {}).get("mirrors", {})
     wanted = sorted({upstream for name, _, upstream, _ in mirrors if name in active})
 
@@ -1226,15 +1251,19 @@ def main():
     for ref in refs:
         on_registry.setdefault(split(ref)[0], []).append(ref)
     docker_mirrors = mirrors_with_images(docker_mirrors, on_registry)
-    specs = [("docker", images, [(m[0], m[1]) for m in docker_mirrors if m[2] == upstream])
-             for upstream, images in on_registry.items()] + [(k, items[k], targets[k]) for k in kinds]
+    # One group per official registry, Docker Hub first; a registry without a mirror makes none.
+    registries = sorted({m[2] for m in docker_mirrors}, key=lambda u: (u != HUB_HOST, u))
+    by_registry = [(u, on_registry[u], [m for m in docker_mirrors if m[2] == u]) for u in registries]
+    specs = [(docker_group_id(u), images, [(m[0], m[1]) for m in ms]) for u, images, ms in by_registry]
+    specs += [(k, items[k], targets[k]) for k in kinds]
     active = pick_active(specs, prior, slots, slot)
     asked = set()
     if args.queue:  # visitors' re-check requests
         asked = asked_pairs(queue_read(args.queue), specs)
         active |= asked
     names = lambda gid: {n for g, n in active if g == gid}
-    plans = [docker_group(refs, docker_mirrors, names("docker"), prior.get("docker"))]
+    plans = [docker_group(images, ms, names(docker_group_id(u)), prior.get(docker_group_id(u)))
+             for u, images, ms in by_registry]
     plans += [package_group(k, items[k], targets[k], names(k), prior.get(k)) for k in kinds]
     # Phase 1: ask every official source that is needed now (different sources at the same time).
     run_jobs([job for _, officials, _ in plans for job in officials], args.workers)
