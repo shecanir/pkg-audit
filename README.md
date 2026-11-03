@@ -94,10 +94,14 @@ CI job; pin the commit of this repository you reviewed.
 The page groups mirrors by the registrable domain of their host (`mirror.example.ir` and
 `docker.example.ir` are one provider, `example.ir`); that says nothing about who runs them.
 
-- Each repository checked here (one mirror of one ecosystem) scores the share of its items that
-  matched the official source, from 0 to 1. A repository that served a single mismatch scores 0.
-- A provider's score is the sum over its repositories, so more repositories that answer correctly
-  rank higher. Ties go to the higher share of ok answers, then to the name.
+- A provider's score (0-100) is the lower bound of the 95% Wilson confidence interval of its share
+  of ok answers, over every item of every repository checked here (one mirror of one ecosystem).
+  Both the share and the amount of evidence count: 11 ok of 12 beats 1 of 16, and 94 of 94 beats
+  3 of 3, but size alone does not win.
+- No answer and errors are not ok. Every item of a repository that served a single mismatch counts
+  as not ok.
+- Ties go to the higher share of ok answers, then to the name. Visitors can also sort by share ok,
+  number of repositories or name; the formula is explained under the table.
 - Once two weeks of history exist, each provider also shows its last 30 days.
 
 The auditor is run by Shecan (audit.shecan.ir), which also runs mirrors that appear on the page.
@@ -157,9 +161,11 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 
 میرورها بر اساس دامنه‌ی میزبان گروه می‌شوند (`mirror.example.ir` و `docker.example.ir` یک ارائه‌دهنده‌اند)؛
 این چیزی درباره‌ی اینکه چه کسی آن‌ها را اداره می‌کند نمی‌گوید. هر مخزنی که این‌جا بررسی می‌شود (میرور
-یک اکوسیستم) به اندازه‌ی سهم موردهایی که با منبع رسمی خواندند، از ۰ تا ۱، امتیاز می‌گیرد و مخزنی که حتی
-یک مورد ناهمخوان بدهد ۰ می‌گیرد. امتیاز ارائه‌دهنده جمع امتیاز مخزن‌های اوست؛ در امتیاز برابر، سهم بیشتر
-پاسخ سالم و بعد نام جلو می‌افتد.
+یک اکوسیستم) بررسی می‌شود. امتیاز ارائه‌دهنده (۰ تا ۱۰۰) سهمی از همه‌ی پاسخ‌های اوست که با ۹۵٪ اطمینان
+سالم است (کران پایین بازه‌ی ویلسون)؛ پس هم درصد سالم مهم است و هم تعداد بررسی‌ها: ۱۱ سالم از ۱۲ از ۱ از ۱۶
+بالاتر است و ۹۴ از ۹۴ از ۳ از ۳، ولی بزرگی به‌تنهایی برنده نمی‌شود. بی‌پاسخ و خطا سالم نیستند، و همه‌ی
+پاسخ‌های مخزنی که حتی یک مورد ناهمخوان بدهد ناسالم حساب می‌شوند. در امتیاز برابر، سهم بیشتر پاسخ سالم و
+بعد نام جلو می‌افتد.
 
 این بازرس را شکن اجرا می‌کند و میرورهای شکن هم در همین صفحه هستند. شکن در این رتبه‌بندی هیچ امتیاز
 ویژه‌ای و هیچ برچسب جداگانه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب؛ اینکه صفحه را شکن اداره
