@@ -101,8 +101,8 @@ The page groups mirrors by the registrable domain of their host (`mirror.example
 - Once two weeks of history exist, each provider also shows its last 30 days.
 
 The auditor is run by Shecan (audit.shecan.ir), which also runs mirrors that appear on the page.
-Shecan's mirrors get no advantage: the same formula, the same checks, sorted with everyone else, and
-only a grey tag that discloses who runs the page. If you know a fairer or more useful measure, open an
+Shecan's mirrors get no advantage and no mark of their own: the same formula, the same checks, sorted
+with everyone else; that Shecan runs the page is said in its footer. If you know a fairer or more useful measure, open an
 [issue](https://github.com/shecanir/pkg-audit/issues) or a pull request; we want the ranking to help
 the people who choose a mirror, and to improve our own service by it.
 
@@ -162,8 +162,8 @@ Apache-2.0 (see `LICENSE`). The bundled font Vazirmatn is under the SIL Open Fon
 پاسخ سالم و بعد نام جلو می‌افتد.
 
 این بازرس را شکن اجرا می‌کند و میرورهای شکن هم در همین صفحه هستند. شکن در این رتبه‌بندی هیچ امتیاز
-ویژه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب، و فقط یک برچسب خاکستری که می‌گوید اداره‌کننده‌ی
-صفحه کیست. اگر معیار منصفانه‌تر یا مفیدتری می‌شناسید، در
+ویژه‌ای و هیچ برچسب جداگانه‌ای ندارد: همان فرمول، همان بررسی‌ها، همان ترتیب؛ اینکه صفحه را شکن اداره
+می‌کند در پایین صفحه آمده است. اگر معیار منصفانه‌تر یا مفیدتری می‌شناسید، در
 [issueها](https://github.com/shecanir/pkg-audit/issues) یا با pull request پیشنهاد دهید تا اضافه شود؛
 ما به دنبال بهتر کردن خودمان و خدمات‌مان برای کاربران هستیم.
 
