@@ -122,6 +122,16 @@ class Page(unittest.TestCase):
             pa.BRAND["ours"] = ""
         self.assertEqual(sorted(hosts, key=out.index), ["d.example", "b.example", "c.example", "a.example"])
 
+    def test_404_is_shown_apart_from_no_answer(self):
+        g = self.group()
+        g["items"] = ["x@1", "y@1"]
+        g["mirrors"]["m.example"]["rows"] = {"x@1": {"verdict": "missing", "value": None, "detail": "HTTP 404"},
+                                             "y@1": {"verdict": "unreachable", "value": None, "detail": "timed out"}}
+        out = pa.page({"generated": "2026-01-01T10:05:00Z", "groups": [g]})
+        self.assertIn("پیدا نشد (۴۰۴)", out)
+        self.assertIn("در دسترس نیست", out)
+        self.assertNotIn("بدون پاسخ", out)
+
     def test_ecosystems_with_most_mirrors_first(self):
         one, two = self.group(), self.group()
         one["id"], one["title"] = "pypi", "PyPI"
