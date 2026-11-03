@@ -241,6 +241,47 @@ class Verdicts(unittest.TestCase):
         self.assertEqual({r: v["verdict"] for r, v in group["mirrors"]["mcr"]["rows"].items()},
                          {"mcr.microsoft.com/dotnet/aspnet:9.0": "mismatch"})
 
+    def test_each_official_registry_gets_its_own_group(self):
+        class Same:
+            def __init__(self, base, ip=None):
+                pass
+
+            def digest(self, repo, tag):
+                return "sha256:" + "a" * 64
+
+            def manifest_hashes_to(self, repo, digest):
+                return True
+
+        def leave(code):  # main() ends with os._exit, which would end the test run too
+            raise SystemExit(code)
+
+        real, pa.Registry = pa.Registry, Same
+        real_exit, pa.os._exit = pa.os._exit, leave
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                d = Path(d)
+                (d / "images.txt").write_text("alpine:3.20\nmcr.microsoft.com/dotnet/aspnet:9.0\nquay.io/a/b:1\n")
+                (d / "mirrors.txt").write_text("hub https://hub.mirror\nmcr https://mcr.mirror mcr.microsoft.com\n")
+                argv, sys.argv = sys.argv, ["pkg_audit.py", str(d / "images.txt"), str(d / "mirrors.txt"),
+                                            "--json", str(d / "r.json"), "--html", str(d / "i.html")]
+                try:
+                    pa.main()
+                except SystemExit as exc:
+                    self.assertIn(exc.code, (0, None))
+                finally:
+                    sys.argv = argv
+                report = json.loads((d / "r.json").read_text())
+                page = (d / "i.html").read_text()
+        finally:
+            pa.Registry, pa.os._exit = real, real_exit
+        groups = {g["id"]: g for g in report["groups"]}
+        self.assertEqual(list(groups), ["docker", "docker-mcr-microsoft-com"])  # Docker Hub first; quay has no mirror
+        self.assertEqual((groups["docker"]["title"], list(groups["docker"]["mirrors"]), groups["docker"]["items"]),
+                         ("Docker Hub", ["hub"], ["alpine:3.20"]))
+        self.assertEqual((groups["docker-mcr-microsoft-com"]["title"], list(groups["docker-mcr-microsoft-com"]["mirrors"])),
+                         ("Microsoft (MCR)", ["mcr"]))
+        self.assertIn('href="#docker-mcr-microsoft-com"', page)
+
     def test_an_official_registry_that_is_down_keeps_its_mirrors_last_result(self):
         class Down:
             def __init__(self, base, ip=None):
