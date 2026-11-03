@@ -546,7 +546,7 @@ class History(unittest.TestCase):
             self.assertEqual('class="trend"' in out, day == 14)
         self.assertIn("۱۴ روز: ۹۳٪", out)  # 13 of 14 answers ok; no answer is not counted
         self.assertIn("سابقه‌ی ناهمخوانی‌ها", out)
-        self.assertIn("رفع شد ۲۰۲۶/۱۱/۰۴", out)
+        self.assertIn("رفع شد ۱۴۰۵/۰۸/۱۳", out)  # 2026-11-04, in the Persian calendar
 
     def test_providers_group_hosts_by_domain(self):
         self.assertEqual(pa.provider("mirror.arvancloud.ir"), "arvancloud.ir")
@@ -577,6 +577,14 @@ class History(unittest.TestCase):
         self.assertIn('data-score="1.500" data-pct="0.7500" data-repos="2"', out)  # what the sort buttons read
         self.assertIn('data-vsort="score" aria-pressed="true"', out)
         self.assertNotIn('class="verdict', out)  # no banner without a mismatch
+
+    def test_dates_are_shown_in_the_persian_calendar(self):
+        self.assertEqual(pa.jalali(2024, 3, 20), (1403, 1, 1))
+        self.assertEqual(pa.jalali(2025, 3, 21), (1404, 1, 1))
+        self.assertEqual(pa.jalali(2026, 3, 20), (1404, 12, 29))  # 1404 is a common year
+        self.assertEqual(pa.jalali(2025, 3, 20), (1403, 12, 30))  # 1403 is a leap year
+        self.assertEqual(pa.jalali(2026, 11, 3), (1405, 8, 12))
+        self.assertEqual(pa.fa_day("2026-11-03"), "۱۴۰۵/۰۸/۱۲")
 
     def test_a_broken_file_is_kept_aside(self):
         with tempfile.TemporaryDirectory() as d:
