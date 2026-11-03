@@ -26,6 +26,8 @@ network.
 | Node.js, Go, Gradle, Helm, kubectl, HashiCorp | the checksum file of a pinned release |
 
 Packages are pinned to a version, so metadata is immutable and any difference is a `mismatch`.
+A check that gives no value is `missing` (the mirror answered 404 or 410), `unreachable` (timeout,
+connection refused or reset) or `error` (any other HTTP status or an unusable answer).
 Files themselves are not downloaded (except Go module zips, which are hashed here): equal hashes
 mean equal content, and a client verifies the file against that hash.
 

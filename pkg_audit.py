@@ -18,7 +18,9 @@ For every image in the list and every mirror:
                       mirror lags
             mismatch  a digest Docker Hub does not have at all, or a manifest whose bytes do not
                       hash to its digest: investigate at once
-            error     the mirror did not answer usefully (HTTP status, timeout)
+            missing   the mirror answered 404 (or 410): it does not have the image or tag
+            unreachable  no answer at all (timeout, connection refused or reset)
+            error     an answer that cannot be used (another HTTP status, a broken body)
 Layers are not downloaded: a manifest names its config and layers by hash, so equal manifest
 digests mean equal content, and a client verifies every blob against the manifest it pulled.
 
@@ -93,6 +95,22 @@ def skip_reason(down):
     if down >= GIVE_UP_AFTER:
         return f"skipped: {GIVE_UP_AFTER} requests in a row got no answer"
     return "skipped: the run's time budget (--max-seconds) was used up"
+
+
+FAILED = ("missing", "unreachable", "error")  # verdicts of a check that gave no value to compare
+NO_ANSWER = re.compile(r"timed out|timeout|refused|reset by peer|unreachable|no route|not known|getaddrinfo|"
+                       r"Errno|SOCKS|tunnel|Remote end closed|EOF occurred|no answer", re.I)
+
+
+def failure_verdict(detail, exc=None):
+    """missing for a 404/410, unreachable when the host gave no answer, error for any other failure.
+    Read from the message too, since get() turns network errors into RuntimeError(reason) and older
+    reports saved only the message."""
+    if re.match(r"HTTP (404|410)\b", detail):
+        return "missing"
+    if (exc is not None and unreachable(exc)) or NO_ANSWER.search(detail):
+        return "unreachable"
+    return "error"
 
 
 def unreachable(exc):
@@ -325,13 +343,13 @@ def check_rows(items, rows, check):
             continue
         row = rows[item] = {"verdict": "error", "value": None, "detail": ""}
         if down >= GIVE_UP_AFTER:  # a host that answers nothing is a finding, and is reported
-            row["detail"] = skip_reason(down)
+            row.update(verdict="unreachable", detail=skip_reason(down))
             continue
         try:
             check(item, row)
             down = 0
         except Exception as exc:
-            row["detail"] = str(exc)
+            row.update(verdict=failure_verdict(str(exc), exc), detail=str(exc))
             down = down + 1 if unreachable(exc) else 0
         progress()
 
@@ -774,6 +792,9 @@ def load_state(path):
                 rows = m.get("rows", {})
                 for item in [i for i, r in rows.items() if str(r.get("detail", "")).startswith(LEGACY_UNCHECKED)]:
                     del rows[item]
+                for r in rows.values():  # older reports had one "error" for every failure
+                    if r.get("verdict") == "error" and r.get("detail"):
+                        r["verdict"] = failure_verdict(str(r["detail"]))
         return groups
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {}
@@ -807,7 +828,9 @@ BADGE = {  # verdict -> (css class, icon, Persian label)
     "ok": ("ok", "✓", "سالم"),
     "stale": ("stale", "◷", "قدیمی"),
     "mismatch": ("bad", "✕", "ناهمخوان"),
-    "error": ("err", "!", "بدون پاسخ"),
+    "missing": ("miss", "∅", "پیدا نشد (۴۰۴)"),
+    "unreachable": ("err", "○", "در دسترس نیست"),
+    "error": ("fail", "!", "خطا"),
     "pending": ("err", "…", "در صف بررسی"),
 }
 DEFAULT_BRAND = {
@@ -830,11 +853,11 @@ BRAND = dict(DEFAULT_BRAND)
 CSS = """
 @font-face{font-family:Vazirmatn;src:url(/vazirmatn.woff2) format('woff2');font-weight:100 900;font-display:swap}
 :root{--bg:#f4f1ea;--card:#fff;--fg:#0e2218;--muted:#5d6d63;--line:#e2ddd0;--primary:#157a4a;
---ok:#1f9d5c;--stale:#d19a1a;--bad:#d6334a;--err:#98a39c;
+--ok:#1f9d5c;--stale:#d19a1a;--bad:#d6334a;--err:#98a39c;--miss:#2f6fd0;--fail:#8a5cc7;--missbg:#2f6fd01c;--failbg:#8a5cc71f;
 --okbg:#1f9d5c1c;--stalebg:#d19a1a24;--badbg:#d6334a1f;--errbg:#98a39c26;
 --font:Vazirmatn,Tahoma,'Segoe UI',system-ui,sans-serif}
 @media(prefers-color-scheme:dark){:root{--bg:#0b1411;--card:#111c18;--fg:#e4ede7;--muted:#8ea196;--line:#1d2d26;
---primary:#6fd69a;--ok:#4ccf86;--stale:#e6b640;--bad:#ff6f83;--err:#6f8178;
+--primary:#6fd69a;--ok:#4ccf86;--stale:#e6b640;--bad:#ff6f83;--err:#6f8178;--miss:#7aa7ff;--fail:#b494ef;--missbg:#7aa7ff22;--failbg:#b494ef22;
 --okbg:#4ccf8622;--stalebg:#e6b64024;--badbg:#ff6f8326;--errbg:#6f817826}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.8 var(--font)}
@@ -885,6 +908,7 @@ details.m[open] summary:after{transform:rotate(-90deg)}
 .strip{display:flex;flex-wrap:wrap;gap:3px}
 .sq{width:14px;height:14px;border-radius:4px;background:var(--ok);display:block}
 .sq.stale{background:var(--stale)}.sq.bad{background:var(--bad)}.sq.err{background:var(--err)}
+.sq.miss{background:var(--miss)}.sq.fail{background:var(--fail)}
 .items{margin:0;padding:2px 18px 12px;list-style:none;border-top:1px dashed var(--line)}
 .items li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
 .items li:last-child{border-bottom:0}
@@ -892,6 +916,7 @@ details.m[open] summary:after{transform:rotate(-90deg)}
 .b{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;flex:none}
 .b.ok{color:var(--ok);background:var(--okbg)}.b.stale{color:var(--stale);background:var(--stalebg)}
 .b.bad{color:var(--bad);background:var(--badbg)}.b.err{color:var(--err);background:var(--errbg)}
+.b.miss{color:var(--miss);background:var(--missbg)}.b.fail{color:var(--fail);background:var(--failbg)}
 .legend{display:flex;flex-wrap:wrap;gap:8px 22px;margin:22px 0 6px;color:var(--muted);font-size:13px}
 .legend div{display:flex;align-items:center;gap:8px}
 section.note{margin:26px 0;padding:6px 0}
@@ -989,6 +1014,7 @@ function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),h
 q.addEventListener('input',run);
 function order(by){
   groups.forEach(function(g){g.rows.slice().sort(function(a,b){
+    var o=!a.dataset.ours-!b.dataset.ours;if(o)return o;
     if(by==='score'){var d=a.dataset.score-b.dataset.score||a.dataset.bad-b.dataset.bad;if(d)return d}
     return a.dataset.name<b.dataset.name?-1:a.dataset.name>b.dataset.name?1:0}).forEach(function(d){g.list.appendChild(d)})});
   [].forEach.call(document.querySelectorAll('.sort button'),function(b){b.setAttribute('aria-pressed',b.dataset.sort===by)});
@@ -1049,21 +1075,21 @@ def render_group(g, fa):
         rows = m["rows"]
         done = sum(r["verdict"] == "ok" for r in rows.values())
         bad = sum(r["verdict"] == "mismatch" for r in rows.values())
-        answered = sum(r["verdict"] != "error" for r in rows.values())
+        answered = sum(r["verdict"] not in ("unreachable", "error") for r in rows.values())
         ours = bool(BRAND["ours"]) and n == BRAND["ours"]
         refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
         share = done / len(refs) if refs else 0
         host = m["url"].split("://", 1)[-1]
-        summary.append((-share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
-    summary.sort(key=lambda t: t[:4])  # best score first, then fewer problems, then by name
+        summary.append((not ours, -share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
+    summary.sort(key=lambda t: t[:5])  # ours first, then best score, fewer problems, then by name
     out = ""
-    for share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
+    for _, share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
         seen = checked_label(m.get("checked_at"))
         rows = m["rows"]
         pct = round(100 * done / len(refs)) if refs else 0
         tone = "none" if not answered else "alert" if bad else "good" if done == len(refs) else "warn"
         host = html.escape(m["url"].split("://", 1)[-1])
-        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"'
+        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"{" data-ours=1" if ours else ""}'
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if ours else ""
         strip = ""
         for ref in refs:
@@ -1090,15 +1116,16 @@ def render_group(g, fa):
 
 
 def page(report):
-    groups = report["groups"]
-    counts = {"ok": 0, "stale": 0, "mismatch": 0, "error": 0}
+    # Ecosystems with the most mirrors first; equal ones keep the report's order.
+    groups = sorted(report["groups"], key=lambda g: -len(g["mirrors"]))
+    counts = {"ok": 0, "stale": 0, "mismatch": 0, "missing": 0, "unreachable": 0, "error": 0}
     total = mirror_hosts = 0
     seen = set()
     for g in groups:
         for n, m in g["mirrors"].items():
             seen.add(m["url"].split("/")[2])
             for row in m["rows"].values():
-                counts[row["verdict"]] += 1
+                counts[row["verdict"]] = counts.get(row["verdict"], 0) + 1
                 total += 1
     try:
         stamp = datetime.strptime(report["generated"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
@@ -1112,7 +1139,9 @@ def page(report):
             ("ok", "✓", "سالم", "همان مقداری که منبع رسمی می‌دهد"),
             ("stale", "◷", "قدیمی", "فقط Docker: تگ جابه‌جا شده و میرور نسخه‌ی قبلی را دارد؛ حمله نیست"),
             ("bad", "✕", "ناهمخوان", "مقداری که منبع رسمی ندارد؛ باید بررسی شود"),
-            ("err", "!", "بدون پاسخ", "میرور جواب قابل استفاده نداد")])
+            ("miss", "∅", "پیدا نشد (۴۰۴)", "میرور جواب داد ولی این ایمیج یا بسته را ندارد"),
+            ("err", "○", "در دسترس نیست", "از میرور جوابی نیامد: تایم‌اوت یا قطع اتصال"),
+            ("fail", "!", "خطا", "میرور جواب داد ولی با خطای دیگر (مثلاً ۴۰۳ یا ۵۰۰) یا پاسخ نامعتبر")])
     def who(verdict, limit=6):
         """`host (ecosystem): item, item` lines for every mirror with that verdict, worst first."""
         found = {}
@@ -1139,11 +1168,11 @@ def page(report):
     if counts["mismatch"]:
         vclass, vtext = "alert", f"{fa(counts['mismatch'])} مورد ناهمخوان با منبع رسمی"
         vsub = who("mismatch")
-    elif counts["stale"] or counts["error"]:
+    elif any(counts[v] for v in ("stale",) + FAILED):
         vclass, vtext = "warn", "ناهمخوانی دیده نشد"
-        stale, err = who("stale", 4), who("error", 4)
-        vsub = ((f"<p>نسخه‌ی قدیمی (تگ جابه‌جا شده):</p>{stale}") if stale else "") + \
-               ((f"<p>بدون پاسخ:</p>{err}") if err else "")
+        vsub = "".join(f"<p>{title}:</p>{found}" for title, found in [
+            ("نسخه‌ی قدیمی (تگ جابه‌جا شده)", who("stale", 4)), ("پیدا نشد (۴۰۴)", who("missing", 4)),
+            ("در دسترس نیست", who("unreachable", 4)), ("خطا", who("error", 4))] if found)
     else:
         vclass, vtext, vsub = "good", "همه‌چیز با منبع رسمی می‌خواند", "هیچ ناهمخوانی دیده نشد"
     if vclass == "good" or not vsub.startswith("<"):
@@ -1192,7 +1221,8 @@ def page(report):
 <div class="verdict {vclass}">{verdict_body}</div>
 <div class="nums"><span><b>{fa(len(seen))}</b> میزبان</span><span><b>{fa(len(groups))}</b> اکوسیستم</span>
 <span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
-<span><b>{fa(counts["error"])}</b> بدون پاسخ</span></div>
+<span><b>{fa(counts["missing"])}</b> پیدا نشد (۴۰۴)</span>
+<span><b>{fa(counts["unreachable"])}</b> در دسترس نیست</span><span><b>{fa(counts["error"])}</b> خطا</span></div>
 <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
 <input id="q" type="search" placeholder="جست‌وجو: liara، npm، lodash…" autocomplete="off" aria-label="جست‌وجو" dir="auto"><kbd>/</kbd></div>
 <div id="sres" role="status" aria-live="polite"></div>
@@ -1324,7 +1354,7 @@ def main():
             bad += counts.get("mismatch", 0)
             print(f"{g['id']:7} {name:28} " + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())))
             for ref, row in mirror["rows"].items():
-                if row["verdict"] in ("mismatch", "error"):
+                if row["verdict"] in ("mismatch",) + FAILED:
                     print(f"   {row['verdict'].upper()} {ref} {row['value']} {row['detail']}")
     sys.stdout.flush()
     os._exit(2 if bad else 0)  # abandoned threads must not keep the process alive

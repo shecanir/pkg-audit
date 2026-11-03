@@ -206,14 +206,28 @@ class Verdicts(unittest.TestCase):
     def test_package_verdicts(self):
         values = {"https://official": "good", "https://ok": "good", "https://bad": "evil"}
 
+        failures = {"https://down": RuntimeError("HTTP 500"), "https://gone": RuntimeError("HTTP 404"),
+                    "https://slow": RuntimeError("The read operation timed out")}
+
         def fake(kind, base, item):
-            if base == "https://down":
-                raise RuntimeError("HTTP 500")
+            if base in failures:
+                raise failures[base]
             return values[base]
         pa.fetch_value = fake
-        g = run_group("npm", ["x@1.0.0"], [("ok", "https://ok"), ("bad", "https://bad"), ("down", "https://down")])
+        g = run_group("npm", ["x@1.0.0"], [("ok", "https://ok"), ("bad", "https://bad"), ("down", "https://down"),
+                                           ("gone", "https://gone"), ("slow", "https://slow")])
         got = {n: m["rows"]["x@1.0.0"]["verdict"] for n, m in g["mirrors"].items()}
-        self.assertEqual(got, {"ok": "ok", "bad": "mismatch", "down": "error"})
+        self.assertEqual(got, {"ok": "ok", "bad": "mismatch", "down": "error", "gone": "missing",
+                               "slow": "unreachable"})
+
+    def test_failure_verdicts(self):
+        for detail, exc, want in [("HTTP 404 (HEAD and GET)", None, "missing"), ("HTTP 410", None, "missing"),
+                                  ("HTTP 403", None, "error"), ("HTTP 500", None, "error"),
+                                  ("answer longer than 10 bytes", None, "error"),
+                                  ("boom", TimeoutError("boom"), "unreachable"),
+                                  ("[Errno 61] Connection refused", None, "unreachable"),
+                                  ("skipped: 3 requests in a row got no answer", None, "unreachable")]:
+            self.assertEqual(pa.failure_verdict(detail, exc), want, detail)
 
     def test_a_mirror_that_never_answers_is_given_up_on(self):
         calls = []
@@ -227,7 +241,7 @@ class Verdicts(unittest.TestCase):
         g = run_group("npm", [f"p{i}@1.0.0" for i in range(8)], [("dead", "https://dead")])
         self.assertEqual(len(calls), pa.GIVE_UP_AFTER)
         rows = g["mirrors"]["dead"]["rows"]
-        self.assertEqual({r["verdict"] for r in rows.values()}, {"error"})
+        self.assertEqual({r["verdict"] for r in rows.values()}, {"unreachable"})
         self.assertIn("skipped", rows["p7@1.0.0"]["detail"])
 
     def test_checks_never_made_leave_no_row_instead_of_an_error(self):
@@ -444,9 +458,11 @@ class Pool(unittest.TestCase):
                 "a": {"verdict": "error", "value": None, "detail": "skipped: the run's time budget (--max-seconds) was used up"},
                 "b": {"verdict": "error", "value": None, "detail": "no answer before the run's time budget ran out"},
                 "c": {"verdict": "error", "value": None, "detail": "skipped: 3 requests in a row got no answer"},
-                "d": {"verdict": "ok", "value": "v", "detail": ""}}}}}]}))
+                "d": {"verdict": "ok", "value": "v", "detail": ""},
+                "e": {"verdict": "error", "value": None, "detail": "HTTP 404"}}}}}]}))
             rows = pa.load_state(f)["npm"]["mirrors"]["m"]["rows"]
-        self.assertEqual(sorted(rows), ["c", "d"])  # only the never-made checks are dropped
+        self.assertEqual(sorted(rows), ["c", "d", "e"])  # only the never-made checks are dropped
+        self.assertEqual((rows["c"]["verdict"], rows["e"]["verdict"]), ("unreachable", "missing"))
 
 
 class PageState(unittest.TestCase):
