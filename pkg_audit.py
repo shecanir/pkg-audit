@@ -944,7 +944,11 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 @media(max-width:900px){.nums{grid-template-columns:repeat(3,1fr)}}
 .nums span{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;box-shadow:var(--shadow);font-size:12.5px;line-height:1.5}
 .nums b:first-child{display:block;font-size:24px;line-height:1.3;letter-spacing:-.01em}
-.nums .t{display:flex;flex-direction:column;gap:2px;cursor:help}
+.nums .t{display:flex;flex-direction:column;gap:2px;cursor:help;transition:border-color .15s,box-shadow .15s,opacity .15s}
+.nums .t[role=button]{cursor:pointer}.nums .t[role=button]:hover{border-color:color-mix(in srgb,var(--c) 55%,var(--line))}
+.nums .t[aria-pressed=true]{border-color:var(--c);box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 22%,transparent)}
+.nums.filtering .t:not([aria-pressed=true]){opacity:.5}
+#sres button{font:600 12.5px var(--font);color:var(--primary);background:none;border:0;padding:0 6px;cursor:pointer;text-decoration:underline dotted}
 .nums .t em{display:flex;align-items:center;gap:7px;font-style:normal;font-weight:700;font-size:13px;color:var(--fg)}
 .nums .t em .sq{flex:none;width:10px;height:10px;box-shadow:none}.nums .t em .sq.err{border-width:1.5px}
 .nums .t small{color:var(--muted);font-size:12px;line-height:1.5}
@@ -994,6 +998,10 @@ footer{margin-top:10px}
 .verdict summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px}
 .verdict summary::-webkit-details-marker{display:none}
 .verdict .verdict summary b,.verdict summary b{font-size:19px}
+.ours{display:inline-flex;align-items:center;gap:6px;font:700 12.5px var(--font);border-radius:999px;padding:3px 12px;background:var(--card);border:1px solid color-mix(in srgb,currentColor 30%,transparent);white-space:nowrap}
+.ours.ok{color:var(--ok)}.ours.warn{color:var(--stale)}.ours.bad{color:var(--bad)}
+.verdict div>.ours{margin-inline-start:12px;vertical-align:4px}
+.vsub p.vnote{margin:0 0 4px;color:var(--fg)}
 .vhint{margin-inline-start:auto;display:inline-flex;align-items:center;gap:8px;font:600 12.5px var(--font);color:var(--muted);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:999px;padding:3px 12px}
 .vhint:after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 0 1.5px 1.5px;transform:translateY(-2px) rotate(-45deg);transition:transform .15s}
 details[open]>summary .vhint:after{transform:translateY(2px) rotate(135deg)}
@@ -1009,23 +1017,34 @@ SEARCH = r'''<script>
 var groups=[].map.call(document.querySelectorAll('h2.gt'),function(h){
   var note=h.nextElementSibling,list=note.nextElementSibling;
   return{h:h,note:note,list:list,rows:[].slice.call(list.querySelectorAll('details.m')),tab:document.querySelector('nav.tabs a[href="#'+h.id+'"]')}});
-var opened=new WeakMap();
+var opened=new WeakMap(),st='',stl='',tiles=[].slice.call(document.querySelectorAll('.nums .t[role=button]'));
 function norm(t){return t.toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک')}
-function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),hits=0,hosts=0;
+function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),hits=0,filt=words.length||st;
   groups.forEach(function(g){var gtext=norm(g.h.textContent),shown=0;
     g.rows.forEach(function(d){
-      var hay=norm(d.textContent)+' '+gtext,ok=words.every(function(w){return hay.indexOf(w)>-1});
+      var hay=norm(d.textContent)+' '+gtext,ok=words.every(function(w){return hay.indexOf(w)>-1})&&(!st||!!d.querySelector('.items .b.'+st));
       d.classList.toggle('hide',!ok);
       if(ok){shown++;
-        if(words.length){if(!opened.has(d))opened.set(d,d.open);d.open=true;
-          d.querySelectorAll('.items li').forEach(function(li){li.classList.toggle('hide',!words.every(function(w){return norm(li.textContent+' '+d.querySelector('.host').textContent).indexOf(w)>-1}) && !words.every(function(w){return norm(d.querySelector('.host').textContent+' '+gtext).indexOf(w)>-1}))})}
+        if(filt){if(!opened.has(d))opened.set(d,d.open);d.open=true;
+          var host=d.querySelector('.host').textContent,whole=words.length&&words.every(function(w){return norm(host+' '+gtext).indexOf(w)>-1});
+          d.querySelectorAll('.items li').forEach(function(li){
+            var w=!words.length||whole||words.every(function(w){return norm(li.textContent+' '+host).indexOf(w)>-1});
+            var s=!st||li.classList.contains('req')||!!li.querySelector('.b.'+st);
+            li.classList.toggle('hide',!(w&&s))})}
         else{if(opened.has(d)){d.open=opened.get(d);opened.delete(d)}d.querySelectorAll('.items li').forEach(function(li){li.classList.remove('hide')})}}
     });
-    var on=shown>0||!words.length;
+    var on=shown>0||!filt;
     [g.h,g.note,g.list].forEach(function(e){e.classList.toggle('hide',!on)});
     if(g.tab)g.tab.classList.toggle('off',!on);
     hits+=shown;});
-  res.textContent=words.length?(hits?hits.toLocaleString('fa-IR')+' میرور پیدا شد':'چیزی پیدا نشد؛ نام میزبان، اکوسیستم یا بسته را امتحان کنید'):''}
+  res.textContent=filt?(hits?hits.toLocaleString('fa-IR')+' میرور'+(st?' با وضعیت «'+stl+'»':'')+' پیدا شد':'چیزی پیدا نشد؛ نام میزبان، اکوسیستم یا بسته را امتحان کنید'):'';
+  if(st){var x=document.createElement('button');x.type='button';x.className='unst';x.textContent='برداشتن فیلتر';res.appendChild(x)}}
+function status(c){st=st===c?'':c;tiles.forEach(function(t){var on=t.dataset.tc===st;t.setAttribute('aria-pressed',on);if(on)stl=t.dataset.tl});
+  document.querySelector('.nums').classList.toggle('filtering',!!st);run()}
+document.addEventListener('click',function(e){var t=e.target.closest&&e.target.closest('.nums .t[role=button]');if(t)status(t.dataset.tc);
+  else if(e.target.closest&&e.target.closest('#sres .unst'))status('')});
+document.addEventListener('keydown',function(e){var t=e.target.closest&&e.target.closest('.nums .t[role=button]');
+  if(t&&(e.key==='Enter'||e.key===' ')){e.preventDefault();status(t.dataset.tc)}});
 q.addEventListener('input',run);
 function order(by){
   groups.forEach(function(g){g.rows.slice().sort(function(a,b){
@@ -1038,7 +1057,8 @@ document.addEventListener('click',function(e){var b=e.target.closest&&e.target.c
 try{if(localStorage.getItem('sort')==='name')order('name')}catch(e){}
 document.addEventListener('keydown',function(e){
   if(e.key==='/'&&document.activeElement!==q&&!/input|textarea/i.test(document.activeElement.tagName)){e.preventDefault();q.focus()}
-  else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}});
+  else if(e.key==='Escape'&&document.activeElement===q){q.value='';run();q.blur()}
+  else if(e.key==='Escape'&&st)status('')});
 })();
 </script>'''
 
@@ -1171,7 +1191,9 @@ def page(report):
     fa = lambda n: str(n).translate(FA_DIGITS)
     tiles = "".join(
         f'<span class="t {c}{" zero" if not counts[v] and v != "ok" else " hot" if counts[v] else ""}" tabindex="0" '
-        f'data-tc="{c}" data-tl="{BADGE[v][2]}" data-td="{t}"><b>{fa(counts[v])}</b>'
+        f'style="--c:var(--{c})"{" role=button aria-pressed=false" if counts[v] else ""} '
+        f'data-tc="{c}" data-tl="{BADGE[v][2]}" data-td="{t}{" برای دیدن میرورهایش بزنید." if counts[v] else ""}">'
+        f'<b>{fa(counts[v])}</b>'
         f'<em><i class="sq {"" if c == "ok" else c}" aria-hidden="true"></i>{BADGE[v][2]}</em><small>{s}</small></span>'
         for v, c, s, t in [
             ("ok", "ok", f"از {fa(total)} پاسخ، همان مقدار منبع رسمی", "میرور همان مقداری را داد که منبع رسمی می‌دهد."),
@@ -1206,21 +1228,42 @@ def page(report):
         extra = f"<li>و {fa(len(lines) - limit)} میرور دیگر</li>" if len(lines) > limit else ""
         return "<ul>" + "".join(lines[:limit]) + extra + "</ul>" if lines else ""
 
+    mine = {}
+    for g in groups:
+        m = g["mirrors"].get(BRAND["ours"]) if BRAND["ours"] else None
+        for row in (m or {}).get("rows", {}).values():
+            mine[row["verdict"]] = mine.get(row["verdict"], 0) + 1
+    problems = sum(counts[v] for v in ("stale",) + FAILED)
+    my_problems = sum(mine.get(v, 0) for v in ("mismatch", "stale") + FAILED)
+    others = " در میرورهای دیگر" if BRAND["ours"] and mine else ""
+    pill = ""
+    if BRAND["ours"] and mine:
+        label = html.escape(BRAND["name"] or BRAND["ours_label"])
+        if mine.get("mismatch"):
+            pill = f'<span class="ours bad">میرور {label}: {fa(mine["mismatch"])} ناهمخوان</span>'
+        elif my_problems:
+            pill = f'<span class="ours warn">میرور {label}: {fa(my_problems)} مشکل</span>'
+        else:
+            pill = f'<span class="ours ok"><span aria-hidden="true">✓</span> میرور {label}: همه سالم</span>'
     if counts["mismatch"]:
-        vclass, vtext = "alert", f"{fa(counts['mismatch'])} مورد ناهمخوان با منبع رسمی"
+        vclass = "alert"
+        vtext = f"{fa(counts['mismatch'])} مورد ناهمخوان با منبع رسمی{others if not mine.get('mismatch') else ''}"
         vsub = who("mismatch")
-    elif any(counts[v] for v in ("stale",) + FAILED):
-        vclass, vtext = "warn", "ناهمخوانی دیده نشد"
+    elif problems:
+        vclass = "warn"
+        vtext = f"{fa(problems)} مشکل{others if not my_problems else ''}"
+        vnote = "ناهمخوانی (مقدار ساختگی) نیست؛ فقط نسخه‌ی قدیمی، مورد ناموجود یا میروری که جواب نداد"
         vsub = "".join(f"<p>{title}:</p>{found}" for title, found in [
             ("نسخه‌ی قدیمی (تگ جابه‌جا شده)", who("stale", 4)), ("پیدا نشد (۴۰۴)", who("missing", 4)),
             ("در دسترس نیست", who("unreachable", 4)), ("خطا", who("error", 4))] if found)
+        vsub = f'<p class="vnote">{vnote}.</p>{vsub}'
     else:
         vclass, vtext, vsub = "good", "همه‌چیز با منبع رسمی می‌خواند", "هیچ ناهمخوانی دیده نشد"
     if vclass == "good" or not vsub.startswith("<"):
-        verdict_body = f'<div><b>{vtext}</b><div class="vsub">{vsub}</div></div>'
+        verdict_body = f'<div><b>{vtext}</b>{pill}<div class="vsub">{vsub}</div></div>'
     else:  # problems are listed behind a summary: open when something does not match, closed when it is only old or silent
         opened = " open" if vclass == "alert" else ""
-        verdict_body = (f'<details class="vd"{opened}><summary><b>{vtext}</b>'
+        verdict_body = (f'<details class="vd"{opened}><summary><b>{vtext}</b>{pill}'
                         f'<span class="vhint">جزئیات</span></summary><div class="vsub">{vsub}</div></details>')
     nav = "".join(f'<a href="#{g["id"]}">{html.escape(g["title"])}</a>' for g in groups)
     nav += ('<span class="sort" role="group" aria-label="ترتیب">'
