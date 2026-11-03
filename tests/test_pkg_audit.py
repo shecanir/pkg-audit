@@ -506,5 +506,68 @@ class Page(unittest.TestCase):
         pa.BRAND["source_url"] = ""
 
 
+class History(unittest.TestCase):
+    def report(self, at, rows, url="https://m.example"):
+        return {"generated": at, "groups": [{"id": "npm", "mirrors": {"m": {"url": url, "rows": {
+            i: {"verdict": v, "value": "h" if v != "missing" else None, "detail": ""} for i, v in rows.items()}}}}]}
+
+    def test_counts_days_and_changes(self):
+        h = pa.add_history({}, self.report("2026-11-03T10:00:00Z", {"a@1": "ok", "b@1": "mismatch", "c@1": "pending"}),
+                           {("npm", "m")})
+        self.assertEqual(h["days"], {"2026-11-03": {"npm/m": {"ok": 1, "mismatch": 1}}})
+        self.assertEqual([(e["item"], e["from"], e["to"]) for e in h["events"]], [("b@1", None, "mismatch")])
+        # 21:00 UTC is already the next day in Tehran
+        h = pa.add_history(h, self.report("2026-11-03T21:00:00Z", {"a@1": "missing", "b@1": "mismatch"}), {("npm", "m")})
+        self.assertEqual(h["days"]["2026-11-04"], {"npm/m": {"missing": 1, "mismatch": 1}})
+        self.assertEqual([(e["item"], e["from"], e["to"]) for e in h["events"]][1:], [("a@1", "ok", "missing")])
+        self.assertEqual(h["mirrors"], {"npm/m": "https://m.example"})
+
+    def test_results_kept_from_an_earlier_run_are_not_counted(self):
+        h = pa.add_history({}, self.report("2026-11-03T10:00:00Z", {"a@1": "ok"}), set())
+        self.assertEqual(h["days"], {"2026-11-03": {}})
+        self.assertEqual(h["events"], [])
+
+    def test_old_days_and_changes_go_but_mismatches_stay(self):
+        h = pa.add_history({}, self.report("2026-01-01T10:00:00Z", {"a@1": "ok", "b@1": "mismatch"}), {("npm", "m")})
+        h = pa.add_history(h, self.report("2026-01-02T10:00:00Z", {"a@1": "missing", "b@1": "ok"}), {("npm", "m")})
+        h = pa.add_history(h, self.report("2026-06-01T10:00:00Z", {"a@1": "ok", "b@1": "ok"}), {("npm", "m")})
+        self.assertEqual(sorted(h["days"]), ["2026-06-01"])
+        self.assertEqual([(e["item"], e["from"], e["to"]) for e in h["events"]],
+                         [("b@1", None, "mismatch"), ("b@1", "mismatch", "ok"), ("a@1", "missing", "ok")])
+
+    def test_the_page_shows_the_history_after_two_weeks(self):
+        h, active = {}, {("npm", "m")}
+        for day in range(1, 15):
+            rows = {"a@1": "mismatch" if day == 3 else "ok", "b@1": "unreachable"}
+            h = pa.add_history(h, self.report(f"2026-11-{day:02}T08:00:00Z", rows), active)
+            report = self.report(f"2026-11-{day:02}T08:00:00Z", rows)
+            report["groups"][0].update(title="npm", note="n", items=["a@1", "b@1"])
+            out = pa.page(report, h)
+            self.assertEqual('class="trend"' in out, day == 14)
+        self.assertIn("۱۴ روز: ۹۳٪", out)  # 13 of 14 answers ok; no answer is not counted
+        self.assertIn("سابقه‌ی ناهمخوانی‌ها", out)
+        self.assertIn("رفع شد ۲۰۲۶/۱۱/۰۴", out)
+
+    def test_providers_group_hosts_by_domain(self):
+        self.assertEqual(pa.provider("mirror.arvancloud.ir"), "arvancloud.ir")
+        self.assertEqual(pa.provider("mirror.ut.ac.ir"), "ut.ac.ir")
+        self.assertEqual(pa.provider("10.0.0.1"), "10.0.0.1")
+        report = self.report("2026-11-03T08:00:00Z", {"a@1": "ok", "b@1": "unreachable"}, url="https://npm.m.example")
+        report["groups"][0].update(title="npm", note="n", items=["a@1", "b@1"])
+        out = pa.page(report)
+        self.assertIn('data-q="m.example"', out)
+        self.assertIn("۵۰٪", out)
+        self.assertNotIn('class="verdict', out)  # no banner without a mismatch
+
+    def test_a_broken_file_is_kept_aside(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = f"{d}/history.json"
+            Path(path).write_text("{not json")
+            with contextlib.redirect_stderr(io.StringIO()):
+                pa.record_history(path, self.report("2026-11-03T10:00:00Z", {"a@1": "ok"}), {("npm", "m")})
+            self.assertEqual(Path(path + ".broken").read_text(), "{not json")
+            self.assertEqual(json.loads(Path(path).read_text())["days"], {"2026-11-03": {"npm/m": {"ok": 1}}})
+
+
 if __name__ == "__main__":
     unittest.main()

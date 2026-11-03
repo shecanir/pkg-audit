@@ -120,7 +120,8 @@ class Page(unittest.TestCase):
             out = pa.render_group(g, str)
         finally:
             pa.BRAND["ours"] = ""
-        self.assertEqual(sorted(hosts, key=out.index), ["d.example", "b.example", "c.example", "a.example"])
+        # our own mirror gets no place of its own: it is sorted by its score like the others
+        self.assertEqual(sorted(hosts, key=out.index), ["b.example", "c.example", "a.example", "d.example"])
 
     def test_404_is_shown_apart_from_no_answer(self):
         g = self.group()
