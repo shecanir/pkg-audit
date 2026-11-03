@@ -548,6 +548,17 @@ class History(unittest.TestCase):
         self.assertIn("سابقه‌ی ناهمخوانی‌ها", out)
         self.assertIn("رفع شد ۲۰۲۶/۱۱/۰۴", out)
 
+    def test_providers_group_hosts_by_domain(self):
+        self.assertEqual(pa.provider("mirror.arvancloud.ir"), "arvancloud.ir")
+        self.assertEqual(pa.provider("mirror.ut.ac.ir"), "ut.ac.ir")
+        self.assertEqual(pa.provider("10.0.0.1"), "10.0.0.1")
+        report = self.report("2026-11-03T08:00:00Z", {"a@1": "ok", "b@1": "unreachable"}, url="https://npm.m.example")
+        report["groups"][0].update(title="npm", note="n", items=["a@1", "b@1"])
+        out = pa.page(report)
+        self.assertIn('data-q="m.example"', out)
+        self.assertIn("۵۰٪", out)
+        self.assertNotIn('class="verdict', out)  # no banner without a mismatch
+
     def test_a_broken_file_is_kept_aside(self):
         with tempfile.TemporaryDirectory() as d:
             path = f"{d}/history.json"
