@@ -989,6 +989,7 @@ function run(){var v=norm(q.value.trim()),words=v.split(/\s+/).filter(Boolean),h
 q.addEventListener('input',run);
 function order(by){
   groups.forEach(function(g){g.rows.slice().sort(function(a,b){
+    var o=!a.dataset.ours-!b.dataset.ours;if(o)return o;
     if(by==='score'){var d=a.dataset.score-b.dataset.score||a.dataset.bad-b.dataset.bad;if(d)return d}
     return a.dataset.name<b.dataset.name?-1:a.dataset.name>b.dataset.name?1:0}).forEach(function(d){g.list.appendChild(d)})});
   [].forEach.call(document.querySelectorAll('.sort button'),function(b){b.setAttribute('aria-pressed',b.dataset.sort===by)});
@@ -1054,16 +1055,16 @@ def render_group(g, fa):
         refs = m.get("items", g["items"])  # the images of the registry this mirror stands for
         share = done / len(refs) if refs else 0
         host = m["url"].split("://", 1)[-1]
-        summary.append((-share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
-    summary.sort(key=lambda t: t[:4])  # best score first, then fewer problems, then by name
+        summary.append((not ours, -share, bad, -answered, host.lower(), n, m, done, bad, answered, ours, refs))
+    summary.sort(key=lambda t: t[:5])  # ours first, then best score, fewer problems, then by name
     out = ""
-    for share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
+    for _, share, _, _, _, n, m, done, bad, answered, ours, refs in summary:
         seen = checked_label(m.get("checked_at"))
         rows = m["rows"]
         pct = round(100 * done / len(refs)) if refs else 0
         tone = "none" if not answered else "alert" if bad else "good" if done == len(refs) else "warn"
         host = html.escape(m["url"].split("://", 1)[-1])
-        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"'
+        key = f'data-score="{share:.4f}" data-bad="{bad}" data-name="{host.lower()}"{" data-ours=1" if ours else ""}'
         tag = f'<span class="tag">{html.escape(BRAND["ours_label"])}</span>' if ours else ""
         strip = ""
         for ref in refs:
@@ -1090,7 +1091,8 @@ def render_group(g, fa):
 
 
 def page(report):
-    groups = report["groups"]
+    # Ecosystems with the most mirrors first; equal ones keep the report's order.
+    groups = sorted(report["groups"], key=lambda g: -len(g["mirrors"]))
     counts = {"ok": 0, "stale": 0, "mismatch": 0, "error": 0}
     total = mirror_hosts = 0
     seen = set()

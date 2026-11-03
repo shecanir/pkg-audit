@@ -115,6 +115,20 @@ class Page(unittest.TestCase):
         out = pa.render_group(g, str)
         hosts = [h for h in ("a.example", "b.example", "c.example", "d.example")]
         self.assertEqual(sorted(hosts, key=out.index), ["b.example", "c.example", "a.example", "d.example"])
+        pa.BRAND["ours"] = "d.example"
+        try:
+            out = pa.render_group(g, str)
+        finally:
+            pa.BRAND["ours"] = ""
+        self.assertEqual(sorted(hosts, key=out.index), ["d.example", "b.example", "c.example", "a.example"])
+
+    def test_ecosystems_with_most_mirrors_first(self):
+        one, two = self.group(), self.group()
+        one["id"], one["title"] = "pypi", "PyPI"
+        two["mirrors"]["n.example"] = dict(two["mirrors"]["m.example"], url="https://n.example")
+        out = pa.page({"generated": "2026-01-01T10:05:00Z", "groups": [one, two]})
+        self.assertLess(out.index('id="npm"'), out.index('id="pypi"'))
+        self.assertLess(out.index('href="#npm"'), out.index('href="#pypi"'))
 
     def test_button_only_when_rechecks_are_enabled(self):
         r = {"generated": "2026-01-01T10:05:00Z", "groups": [self.group()]}
