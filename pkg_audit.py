@@ -895,8 +895,9 @@ details.m summary{list-style:none;cursor:pointer;display:grid;grid-template-colu
 align-items:center;gap:6px 18px;padding:13px 18px}
 details.m summary::-webkit-details-marker{display:none}
 details.m summary:hover{background:var(--errbg)}
-details.m summary:after{content:"‹";color:var(--muted);font-size:20px;line-height:1;transition:transform .15s}
-details.m[open] summary:after{transform:rotate(-90deg)}
+details.m summary:after{content:"";justify-self:center;width:7px;height:7px;border:solid var(--muted);border-width:0 0 1.5px 1.5px;
+transform:translateY(-2px) rotate(-45deg);transition:transform .15s}
+details.m[open] summary:after{transform:translateY(2px) rotate(135deg)}
 .who{min-width:0}.who .host{direction:ltr;text-align:right;display:block;font:13px ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere}
 .when{display:block;color:var(--muted);font-size:12px;margin-top:2px}.when.old{color:var(--stale)}
 .items li.req{justify-content:flex-start;gap:12px;border-bottom:1px dashed var(--line);padding:9px 0}
@@ -941,7 +942,8 @@ h1 span{background:linear-gradient(120deg,var(--primary),var(--ok));-webkit-back
 .lead{font-size:16px}
 .verdict{border-radius:var(--r);padding:18px 22px;box-shadow:var(--shadow);border:1px solid color-mix(in srgb,currentColor 18%,transparent)}
 .verdict b{font-size:24px;letter-spacing:-.01em}
-.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0 8px}
+.nums{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:16px 0 8px}
+@media(max-width:900px){.nums{grid-template-columns:repeat(3,1fr)}}
 .nums span{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:12px 16px;box-shadow:var(--shadow);font-size:12.5px;line-height:1.5}
 .nums b:first-child{display:block;font-size:24px;line-height:1.3;letter-spacing:-.01em}
 .search{position:relative;margin:18px 0 4px}
@@ -980,10 +982,11 @@ footer{margin-top:10px}
 .verdict summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:12px}
 .verdict summary::-webkit-details-marker{display:none}
 .verdict .verdict summary b,.verdict summary b{font-size:19px}
-.vhint{margin-inline-start:auto;font:600 12.5px var(--font);color:var(--muted);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:999px;padding:2px 12px}
-.vhint:after{content:" ‹";display:inline-block;transition:transform .15s}
-details[open]>summary .vhint:after{transform:rotate(-90deg)}
+.vhint{margin-inline-start:auto;display:inline-flex;align-items:center;gap:8px;font:600 12.5px var(--font);color:var(--muted);border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:999px;padding:3px 12px}
+.vhint:after{content:"";width:6px;height:6px;border:solid currentColor;border-width:0 0 1.5px 1.5px;transform:translateY(-2px) rotate(-45deg);transition:transform .15s}
+details[open]>summary .vhint:after{transform:translateY(2px) rotate(135deg)}
 .verdict details[open]>summary{margin-bottom:6px}
+.verdict .vsub b{font-size:inherit;letter-spacing:0}  /* host names in the details: not the heading's size */
 .verdict{padding:12px 20px}
 @media(max-width:680px){.search kbd{display:none}.nums{grid-template-columns:repeat(2,1fr)}.search input{font-size:14px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
@@ -1219,7 +1222,7 @@ def page(report):
 <p class="lead">بسته‌ها و ایمیج‌های پرکاربرد را از هر میرور می‌پرسیم و با پاسخ منبع رسمی مقایسه می‌کنیم،
 از سروری مستقل از میرورها. آخرین بررسی: {when}. هر ساعت تکرار می‌شود.</p>
 <div class="verdict {vclass}">{verdict_body}</div>
-<div class="nums"><span><b>{fa(len(seen))}</b> میزبان</span><span><b>{fa(len(groups))}</b> اکوسیستم</span>
+<div class="nums"><span><b>{fa(len(seen))}</b> میزبان در <b>{fa(len(groups))}</b> اکوسیستم</span>
 <span><b>{fa(counts["ok"])}</b> از <b>{fa(total)}</b> پاسخ سالم</span><span><b>{fa(counts["stale"])}</b> قدیمی</span>
 <span><b>{fa(counts["missing"])}</b> پیدا نشد (۴۰۴)</span>
 <span><b>{fa(counts["unreachable"])}</b> در دسترس نیست</span><span><b>{fa(counts["error"])}</b> خطا</span></div>
