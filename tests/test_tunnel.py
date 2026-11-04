@@ -99,7 +99,10 @@ class Tunnel(unittest.TestCase):
             self.assertEqual(pa.Registry("https://other.mirror.test").token(challenge, "library/alpine"), "t")
         finally:
             pa.urllib.request.build_opener = real
-        self.assertEqual([handlers for handlers, _ in opened], [(pa.TunnelHandler,), ()])
+        self.assertEqual([pa.TunnelHandler in handlers for handlers, _ in opened], [True, False])
+        # redirects are guarded on both, through the tunnel without resolving names here
+        self.assertEqual([[h.tunnel for h in handlers if isinstance(h, pa.GuardedRedirect)] for handlers, _ in opened],
+                         [[True], [False]])
         self.assertIn("scope=repository%3Alibrary%2Falpine%3Apull", opened[0][1])
 
     def test_connect_by_name_through_the_proxy(self):

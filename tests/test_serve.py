@@ -241,6 +241,23 @@ class Server(unittest.TestCase):
         self.assertEqual(self.call("/api/recheck")[0], 404)  # GET is not the API
         self.assertEqual(pa.queue_read(self.queue), {})
 
+    def test_data_files_are_open_to_other_programs(self):
+        (self.site / "summary.json").write_text('{"schema": "pkg-audit/summary@1"}')
+        status, _, headers = self.call("/summary.json")
+        headers = {k.lower(): v for k, v in headers.items()}
+        self.assertEqual((status, headers.get("access-control-allow-origin")), (200, "*"))
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertNotIn("Access-Control-Allow-Origin", self.call("/")[2])
+
+
+class ForwardedFor(unittest.TestCase):
+    def test_only_entries_of_trusted_proxies_count(self):
+        self.assertEqual(serve.client_of("forged, 203.0.113.9", "10.0.0.2", 1), "203.0.113.9")
+        self.assertEqual(serve.client_of("forged, 203.0.113.9, 198.51.100.1", "10.0.0.2", 2), "203.0.113.9")
+        self.assertEqual(serve.client_of("forged", "10.0.0.2", 0), "10.0.0.2")
+        self.assertEqual(serve.client_of(None, "10.0.0.2", 1), "10.0.0.2")
+        self.assertEqual(serve.client_of("203.0.113.9", "10.0.0.2", 2), "203.0.113.9")
+
 
 if __name__ == "__main__":
     unittest.main()

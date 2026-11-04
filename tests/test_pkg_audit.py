@@ -624,5 +624,223 @@ class History(unittest.TestCase):
             self.assertEqual(json.loads(Path(path).read_text())["days"], {"2026-11-03": {"npm/m": {"ok": 1}}})
 
 
+def validate(value, schema, path="$"):
+    """The part of JSON Schema that schema/summary-v1.schema.json uses: type, const, enum, required,
+    properties, items, additionalProperties. Returns a list of errors."""
+    errors = []
+    types = schema.get("type")
+    if types is not None:
+        names = types if isinstance(types, list) else [types]
+        ok = any((t == "null" and value is None) or (t == "boolean" and isinstance(value, bool))
+                 or (t == "integer" and isinstance(value, int) and not isinstance(value, bool))
+                 or (t == "number" and isinstance(value, (int, float)) and not isinstance(value, bool))
+                 or (t == "string" and isinstance(value, str)) or (t == "array" and isinstance(value, list))
+                 or (t == "object" and isinstance(value, dict)) for t in names)
+        if not ok:
+            return [f"{path}: {value!r} is not {types}"]
+    if "const" in schema and value != schema["const"]:
+        errors.append(f"{path}: {value!r} != {schema['const']!r}")
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path}: {value!r} not in {schema['enum']}")
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            if key not in value:
+                errors.append(f"{path}: missing {key}")
+        for key, sub in schema.get("properties", {}).items():
+            if key in value:
+                errors += validate(value[key], sub, f"{path}.{key}")
+        extra = schema.get("additionalProperties")
+        if isinstance(extra, dict):
+            for key, v in value.items():
+                if key not in schema.get("properties", {}):
+                    errors += validate(v, extra, f"{path}.{key}")
+    if isinstance(value, list) and "items" in schema:
+        for i, v in enumerate(value):
+            errors += validate(v, schema["items"], f"{path}[{i}]")
+    return errors
+
+
+SCHEMA = json.loads((Path(__file__).resolve().parent.parent / "schema" / "summary-v1.schema.json").read_text())
+
+
+def ok_rows(items, ms=None):
+    return {item: {"verdict": "ok", "value": "v", "detail": "", **({"ms": ms[i]} if ms else {})}
+            for i, item in enumerate(items)}
+
+
+class Safety(unittest.TestCase):
+    def test_public_addresses(self):
+        for public in ("8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"):
+            self.assertTrue(pa.is_public_address(public), public)
+        for private in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "::1",
+                        "fd00::1", "fe80::1%eth0", "0.0.0.0", "100.64.0.1", "not-an-ip"):
+            self.assertFalse(pa.is_public_address(private), private)
+
+    def test_a_public_mirror_cannot_send_the_auditor_to_a_private_address(self):
+        for target in ("http://169.254.169.254/latest/meta-data/", "https://127.0.0.1:8080/api", "http://[::1]/",
+                       "https://localhost/x", "http://metadata.google.internal/", "file:///etc/passwd", "ftp://8.8.8.8/x"):
+            with self.assertRaises(RuntimeError, msg=target):
+                pa.check_follow("https://8.8.8.8/v2/", target)
+        pa.check_follow("https://8.8.8.8/v2/", "https://1.1.1.1/blob")  # public to public is followed
+
+    def test_names_are_resolved_unless_through_the_tunnel(self):
+        real = pa.socket.getaddrinfo
+        pa.socket.getaddrinfo = lambda host, *a, **k: [(2, 1, 6, "", ("10.0.0.5", 0))] if host == "inside.example" \
+            else [(2, 1, 6, "", ("8.8.8.8", 0))]
+        try:
+            with self.assertRaisesRegex(RuntimeError, "non-public"):
+                pa.check_follow("https://mirror.example/", "https://inside.example/x")
+            pa.check_follow("https://mirror.example/", "https://cdn.example/x")
+
+            def never(*a, **k):
+                raise AssertionError("resolved a name that the tunnel resolves")
+            pa.socket.getaddrinfo = never
+            pa.check_follow("https://mirror.example/", "https://inside.example/x", tunnel=True)
+            with self.assertRaises(RuntimeError):
+                pa.check_follow("https://mirror.example/", "https://10.0.0.5/x", tunnel=True)
+        finally:
+            pa.socket.getaddrinfo = real
+
+    def test_a_private_mirror_may_redirect_anywhere(self):
+        pa.check_follow("http://127.0.0.1:5000/", "http://127.0.0.1:5001/x")  # tests, mirrors inside a network
+
+    def test_redirect_handler_and_token_realm_are_guarded(self):
+        handler = pa.GuardedRedirect()
+        req = pa.urllib.request.Request("https://8.8.8.8/x")
+        with self.assertRaisesRegex(RuntimeError, "non-public"):
+            handler.redirect_request(req, None, 302, "Found", {}, "http://169.254.169.254/")
+        self.assertLessEqual(pa.GuardedRedirect.max_redirections, 5)
+        with self.assertRaisesRegex(RuntimeError, "non-public"):
+            pa.Registry("https://8.8.8.8").token('Bearer realm="http://127.0.0.1:9000/token",service="r"', "library/a")
+
+    def test_answers_are_bounded(self):
+        self.assertEqual(pa.read_limited(io.BytesIO(b"x" * 10), 10), b"x" * 10)
+        with self.assertRaisesRegex(RuntimeError, "longer than 10 bytes"):
+            pa.read_limited(io.BytesIO(b"x" * 11), 10)
+        self.assertGreater(pa.MAX_BODY, 50 << 20)  # an npm packument served in full still fits
+
+
+class Timing(unittest.TestCase):
+    def test_nearest_rank(self):
+        values = list(range(100, 1100, 100))  # 100..1000
+        self.assertEqual((pa.nearest_rank(values, 50), pa.nearest_rank(values, 90)), (500, 900))
+        self.assertEqual((pa.nearest_rank([7], 50), pa.nearest_rank([7], 90)), (7, 7))
+        self.assertEqual(pa.nearest_rank([1, 2], 50), 1)
+
+    def test_only_checks_that_gave_a_value_are_timed(self):
+        rows = {}
+
+        def check(item, row):
+            if item == "bad":
+                raise RuntimeError("HTTP 500")
+            row["verdict"] = "ok"
+        pa.check_rows(["a", "bad", "b"], rows, check)
+        self.assertIsInstance(rows["a"]["ms"], int)
+        self.assertNotIn("ms", rows["bad"])
+        self.assertEqual(pa.check_time(rows)["n"], 2)
+        self.assertIsNone(pa.check_time({"x": {"verdict": "unreachable", "value": None, "detail": "t"}}))
+
+
+class Summary(unittest.TestCase):
+    def setUp(self):
+        self.brand = dict(pa.BRAND)
+        pa.BRAND.update(site_url="https://audit.example.com", source_url="https://github.com/example/pkg-audit",
+                        name="Example", disclosure="Example runs this page and the mirror named ours.",
+                        vantage={"tunnel": "Iran"})
+        items = [f"p{i}@1" for i in range(10)]
+        self.report = {"generated": "2026-11-04T10:00:00Z", "groups": [{
+            "id": "npm", "title": "npm", "note": "n", "items": items, "official": ["https://registry.npmjs.org"], "mirrors": {
+                "ours": {"url": "https://npm.ours.example", "checked_at": "2026-11-04T09:58:00Z", "via": "tunnel",
+                         "rows": ok_rows(items, ms=list(range(100, 1100, 100)))},
+                "bad.example": {"url": "https://npm.bad.example", "checked_at": "2026-11-04T09:59:00Z",
+                                "rows": {**ok_rows(items[1:]), items[0]: {"verdict": "mismatch", "value": "x", "detail": "d"}}},
+                "new.example": {"url": "https://mirror.new.example", "checked_at": None, "rows": {}},
+                "half.example": {"url": "https://half.example", "checked_at": "2026-11-04T09:00:00Z", "rows": ok_rows(items[:5])},
+            }}]}
+
+    def tearDown(self):
+        pa.BRAND.clear()
+        pa.BRAND.update(self.brand)
+
+    def mirror(self, out, name):
+        return next(m for m in out["groups"][0]["mirrors"] if m["name"] == name)
+
+    def test_matches_the_schema(self):
+        out = pa.summary(self.report)
+        self.assertEqual(validate(out, SCHEMA), [])
+        json.dumps(out)  # serialisable
+
+    def test_verdicts_health_and_missing_data(self):
+        out = pa.summary(self.report)
+        ours, bad, new, half = (self.mirror(out, n) for n in ("ours", "bad.example", "new.example", "half.example"))
+        self.assertEqual((ours["healthy"], ours["status"], ours["counts"], ours["score_points"]), (True, "complete", {"ok": 10}, 1.0))
+        self.assertEqual((bad["healthy"], bad["counts"]), (False, {"ok": 9, "mismatch": 1}))
+        self.assertEqual(bad["score_points"], 0)
+        # nothing measured yet: no verdict on health, no time, no points
+        self.assertEqual((new["healthy"], new["status"], new["measured"], new["check_ms"], new["checked_at"]),
+                         (None, "pending", 0, None, None))
+        self.assertEqual((half["healthy"], half["status"], half["measured"]), (False, "partial", 5))
+        self.assertEqual(ours["check_ms"], {"median": 500, "p90": 900, "n": 10})
+        self.assertEqual((ours["via"], bad["via"]), ("tunnel", "direct"))
+        self.assertIsNone(ours["history"]["ok_share"])  # no history yet: not 100%, unknown
+        self.assertEqual(ours["report_url"], "https://audit.example.com/#npm")
+        self.assertEqual(out["methodology"], {"version": pa.METHODOLOGY_VERSION,
+                                              "url": "https://github.com/example/pkg-audit/blob/main/METHODOLOGY.md"})
+        self.assertEqual(out["vantage"], {"tunnel": "Iran"})
+        self.assertIn("ours", out["operator"]["disclosure"])
+
+    def test_provider_ranking_is_the_pages_and_reproducible(self):
+        out = pa.summary(self.report)
+        self.assertEqual([p["provider"] for p in out["providers"]][0], "ours.example")
+        self.assertEqual([p["rank"] for p in out["providers"]], list(range(1, len(out["providers"]) + 1)))
+        points = {}
+        for m in out["groups"][0]["mirrors"]:
+            points[m["provider"]] = points.get(m["provider"], 0) + m["score_points"]
+        for p in out["providers"]:
+            self.assertAlmostEqual(p["score"], points[p["provider"]], places=3)
+        # the operator's own mirror is ranked by the same formula: change nothing but its name
+        renamed = json.loads(json.dumps(self.report))
+        g = renamed["groups"][0]["mirrors"]
+        g["someone-else"] = g.pop("ours")
+        self.assertEqual([p["score"] for p in pa.summary(renamed)["providers"]], [p["score"] for p in out["providers"]])
+
+    def test_a_group_with_one_provider_still_scores_and_says_so(self):
+        self.assertEqual(pa.summary(self.report)["groups"][0]["providers"], 4)
+        alone = json.loads(json.dumps(self.report))
+        alone["groups"][0]["mirrors"] = {"ours": alone["groups"][0]["mirrors"]["ours"]}
+        out = pa.summary(alone)
+        self.assertEqual(out["groups"][0]["providers"], 1)
+        self.assertEqual(self.mirror(out, "ours")["score_points"], 1.0)
+        self.assertEqual((out["providers"][0]["score"], out["providers"][0]["healthy_alone"]), (1.0, 1))
+        self.assertIn("فقط یک ارائه‌دهنده این‌جا بررسی می‌شود", pa.page(alone))
+        self.assertNotIn("فقط یک ارائه‌دهنده این‌جا بررسی می‌شود", pa.page(self.report))
+
+    def test_history_weighs_the_points(self):
+        days = {f"2026-10-{d:02}": {"npm/ours": {"ok": 9, "error": 1, "unreachable": 5}} for d in range(1, 21)}
+        out = pa.summary(self.report, {"days": days, "events": []})
+        ours = self.mirror(out, "ours")
+        self.assertEqual(ours["history"], {"days": 20, "ok": 180, "answered": 200, "unanswered": 100, "ok_share": 0.9})
+        self.assertAlmostEqual(ours["score_points"], 0.9)
+        self.assertTrue(out["rules"]["history_complete"])
+
+    def test_the_page_states_the_method_and_links_the_data(self):
+        out = pa.page(self.report)
+        self.assertIn(pa.METHODOLOGY_VERSION, out)
+        self.assertIn('href="/summary.json"', out)
+        self.assertIn("METHODOLOGY.md", out)
+        self.assertIn("Example runs this page", out)
+        self.assertIn("میانه ۵۰۰ میلی‌ثانیه".translate(pa.FA_DIGITS), out)
+        ld = out.split('<script type="application/ld+json">', 1)[1].split("</script>", 1)[0]
+        data = json.loads(ld)
+        self.assertEqual((data["@type"], data["dateModified"]), ("Dataset", "2026-11-04T10:00:00Z"))
+        self.assertIn("https://audit.example.com/summary.json", [d["contentUrl"] for d in data["distribution"]])
+
+    def test_json_ld_cannot_close_its_script(self):
+        pa.BRAND["title"] = "</script><script>alert(1)</script>"
+        out = pa.page(self.report)
+        ld = out.split('<script type="application/ld+json">', 1)[1].split("</script>", 1)[0]
+        self.assertIn("alert(1)", json.loads(ld)["name"])
+
+
 if __name__ == "__main__":
     unittest.main()

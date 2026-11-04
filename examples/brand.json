@@ -5,5 +5,10 @@
   "name": "نام شما",
   "tagline": "پروژه‌ی میرور بسته‌ها",
   "description": "مقایسه‌ی مستقل بسته‌ها و ایمیج‌های میرورها با منبع رسمی",
-  "footer_html": "این صفحه توسط <a href=\"https://example.com\">نام شما</a> اجرا می‌شود. کوکی و ردیاب ندارد."
+  "footer_html": "این صفحه توسط <a href=\"https://example.com\">نام شما</a> اجرا می‌شود. کوکی و ردیاب ندارد.",
+  "vantage": {
+    "direct": "Germany",
+    "tunnel": "Iran"
+  },
+  "disclosure": "This page is run by Your Name, which also operates the mirror named mymirror; it is checked and scored like every other."
 }

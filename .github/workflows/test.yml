@@ -11,6 +11,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python3 -m py_compile pkg_audit.py serve.py
+      - run: python3 -m json.tool schema/summary-v1.schema.json > /dev/null
       - run: python3 tests/test_pkg_audit.py
       - run: python3 tests/test_serve.py
       - run: python3 tests/test_tunnel.py
