@@ -1097,6 +1097,7 @@ DEFAULT_BRAND = {
     "tagline": "",                   # line under it
     "description": "مقایسه‌ی مستقل بسته‌ها و ایمیج‌های میرورها با منبع رسمی",
     "footer_html": "",               # trusted HTML for the page footer
+    "head_html": "",                 # trusted HTML added at the end of <head> (e.g. an analytics tag of your own)
     "credits_html": "",              # trusted HTML: extra <li> items (your own deployment tools) in the credits section
     "site_url": "",                  # public URL of the page, e.g. https://audit.example.com; enables link previews
     "source_url": "",                # public repository of this tool; shown in the header and the notes
@@ -1820,7 +1821,7 @@ def page(report, history=None):
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(BRAND["title"])}</title>
 <meta name="description" content="{html.escape(BRAND["description"])}">
-{social}<link rel="icon" href="/favicon.svg" type="image/svg+xml"><style>{CSS}</style></head>
+{social}<link rel="icon" href="/favicon.svg" type="image/svg+xml"><style>{CSS}</style>{BRAND["head_html"]}</head>
 <body><div class="wrap">
 <header><img src="/favicon.svg" alt="" width="44" height="44">
 <div class="brand">{html.escape(BRAND["name"])}<small>{html.escape(BRAND["tagline"])}</small></div>{src_link}</header>

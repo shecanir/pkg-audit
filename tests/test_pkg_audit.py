@@ -498,6 +498,12 @@ class Page(unittest.TestCase):
         self.assertIn('property="og:image" content="https://audit.example.com/og.jpg"', out)
         self.assertIn('name="twitter:card" content="summary_large_image"', out)
         pa.BRAND["site_url"] = ""
+        self.assertNotIn("<!--head-->", out)
+        pa.BRAND["head_html"] = "<!--head-->"
+        out = pa.page({"generated": "2026-01-01T00:00:00Z", "groups": [group]})
+        self.assertIn("<style>", out[:out.index("<!--head-->")])
+        self.assertLess(out.index("<!--head-->"), out.index("</head>"))
+        pa.BRAND["head_html"] = ""
         self.assertNotIn('class="src"', out)
         pa.BRAND["source_url"] = "https://github.com/example/pkg-audit"
         out = pa.page({"generated": "2026-01-01T00:00:00Z", "groups": [group]})
