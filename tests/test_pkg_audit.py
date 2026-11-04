@@ -835,6 +835,13 @@ class Summary(unittest.TestCase):
         self.assertEqual((data["@type"], data["dateModified"]), ("Dataset", "2026-11-04T10:00:00Z"))
         self.assertIn("https://audit.example.com/summary.json", [d["contentUrl"] for d in data["distribution"]])
 
+    def test_one_main_landmark_and_links_in_text_are_underlined(self):
+        out = pa.page(self.report)
+        self.assertEqual((out.count("<main"), out.count("</main>")), (1, 1))
+        self.assertLess(out.index("</header>"), out.index("<main"))
+        self.assertLess(out.index("</main>"), out.index("<footer>"))
+        self.assertIn("section.note p a,section.note li a,footer a{text-decoration:underline", out)
+
     def test_json_ld_cannot_close_its_script(self):
         pa.BRAND["title"] = "</script><script>alert(1)</script>"
         out = pa.page(self.report)
