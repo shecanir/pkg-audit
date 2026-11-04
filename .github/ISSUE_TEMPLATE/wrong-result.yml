@@ -1,0 +1,24 @@
+name: Wrong or surprising result
+description: A verdict on audit.shecan.ir (or your own run) that looks wrong
+labels: [result]
+body:
+  - type: input
+    id: where
+    attributes:
+      label: Group, mirror and item
+      description: As on the page or in report.json, e.g. npm / mirror.example.ir / lodash@4.17.21
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: When (UTC or Tehran time) and verdict shown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and how you checked it
+      description: For example the value you got from the official source and from the mirror, with the commands you used.
+    validations:
+      required: true

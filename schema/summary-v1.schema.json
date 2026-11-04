@@ -1,0 +1,325 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shecanir/pkg-audit/blob/main/schema/summary-v1.schema.json",
+  "title": "pkg-audit summary, version 1",
+  "description": "Compact view of one audit run for other programs (pkg_audit.py --summary). New fields may be added without a new version; removing or changing the meaning of one changes `schema` to pkg-audit/summary@2. Times are UTC, ISO 8601 with a Z. A value that was not measured is null, never estimated.",
+  "type": "object",
+  "required": [
+    "schema",
+    "generated_at",
+    "methodology",
+    "operator",
+    "vantage",
+    "rules",
+    "groups",
+    "providers"
+  ],
+  "properties": {
+    "schema": {
+      "const": "pkg-audit/summary@1"
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "When this run ended (UTC). A mirror's own result may be older: see checked_at."
+    },
+    "methodology": {
+      "type": "object",
+      "required": [
+        "version"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "METHODOLOGY.md lists what changed in each version. Do not compare results of different versions as if they were alike."
+        },
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "operator": {
+      "type": "object",
+      "required": [
+        "name",
+        "disclosure"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "disclosure": {
+          "type": "string"
+        }
+      }
+    },
+    "vantage": {
+      "type": "object",
+      "description": "Where the checks are made from, by `via` value (\"direct\", \"tunnel\"): a country or region, never an address.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "rules": {
+      "type": "object",
+      "required": [
+        "healthy_share",
+        "history_days",
+        "history_counts_after_days",
+        "old_after_seconds",
+        "history_complete"
+      ],
+      "properties": {
+        "healthy_share": {
+          "type": "number",
+          "description": "A repository is healthy when no item mismatches and at least this share of its items is ok."
+        },
+        "history_days": {
+          "type": "integer",
+          "description": "Days of history that weigh the score."
+        },
+        "history_counts_after_days": {
+          "type": "integer",
+          "description": "History counts only once this many days have results; before that every weight is 1."
+        },
+        "old_after_seconds": {
+          "type": "integer",
+          "description": "A mirror's result older than this is shown as old."
+        },
+        "history_complete": {
+          "type": "boolean"
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "official",
+          "providers",
+          "items",
+          "mirrors"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable group id (npm, pypi, docker, docker-mcr-microsoft-com, debian, ...); also the anchor on the page."
+          },
+          "title": {
+            "type": "string"
+          },
+          "official": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The official source(s) every mirror of the group is compared with."
+          },
+          "providers": {
+            "type": "integer",
+            "description": "Providers (domains) checked in this group. With 1 there is no comparison; a healthy repository there still scores."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Pinned items checked (image:tag, name@version, file path)."
+          },
+          "mirrors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "host",
+                "provider",
+                "url",
+                "via",
+                "checked_at",
+                "items",
+                "measured",
+                "counts",
+                "status",
+                "healthy",
+                "history",
+                "score_points",
+                "check_ms",
+                "queued"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Stable mirror id within the group (the name in the lists)."
+                },
+                "host": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string",
+                  "description": "Registrable domain of the host; says nothing about who operates it."
+                },
+                "url": {
+                  "type": "string"
+                },
+                "via": {
+                  "enum": [
+                    "direct",
+                    "tunnel"
+                  ]
+                },
+                "checked_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "When this mirror was last checked (UTC); null if never."
+                },
+                "items": {
+                  "type": "integer"
+                },
+                "measured": {
+                  "type": "integer",
+                  "description": "Items with a result (any verdict but pending)."
+                },
+                "counts": {
+                  "type": "object",
+                  "description": "Items per verdict: ok, stale, mismatch, missing, unreachable, error, pending. Absent verdicts are left out.",
+                  "additionalProperties": {
+                    "type": "integer"
+                  }
+                },
+                "status": {
+                  "enum": [
+                    "complete",
+                    "partial",
+                    "pending"
+                  ]
+                },
+                "healthy": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "null when nothing was measured yet."
+                },
+                "history": {
+                  "type": "object",
+                  "required": [
+                    "days",
+                    "ok",
+                    "answered",
+                    "unanswered",
+                    "ok_share"
+                  ],
+                  "properties": {
+                    "days": {
+                      "type": "integer"
+                    },
+                    "ok": {
+                      "type": "integer"
+                    },
+                    "answered": {
+                      "type": "integer",
+                      "description": "Checks that got an answer (every verdict but unreachable)."
+                    },
+                    "unanswered": {
+                      "type": "integer"
+                    },
+                    "ok_share": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "description": "ok / answered over the history window; null while the history is not complete or nothing was answered."
+                    }
+                  }
+                },
+                "score_points": {
+                  "type": "number",
+                  "description": "What this repository adds to its provider's score: its history weight if it is healthy, else 0 (also in a group with one provider)."
+                },
+                "check_ms": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Time per check of this run's results, nearest-rank percentiles; null when no check gave a value. Comparable only within a group and the same via; not a download speed; not part of the score.",
+                  "required": [
+                    "median",
+                    "p90",
+                    "n"
+                  ],
+                  "properties": {
+                    "median": {
+                      "type": "integer"
+                    },
+                    "p90": {
+                      "type": "integer"
+                    },
+                    "n": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "queued": {
+                  "type": "boolean"
+                },
+                "report_url": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "description": "In the page's order: score, then fewer mismatches, then the higher share of ok answers, then the name.",
+      "items": {
+        "type": "object",
+        "required": [
+          "provider",
+          "rank",
+          "score",
+          "healthy",
+          "repositories",
+          "counts",
+          "healthy_alone"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "integer"
+          },
+          "score": {
+            "type": "number",
+            "description": "Sum of score_points of its repositories."
+          },
+          "healthy": {
+            "type": "integer",
+            "description": "Healthy repositories."
+          },
+          "repositories": {
+            "type": "integer"
+          },
+          "counts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "healthy_alone": {
+            "type": "integer",
+            "description": "Of the healthy repositories, those in groups where this provider is the only one checked."
+          }
+        }
+      }
+    }
+  }
+}

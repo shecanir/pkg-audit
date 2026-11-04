@@ -3,7 +3,9 @@
 Independent check that package and container **mirrors** serve what the official source serves.
 
 **Live:** [audit.shecan.ir](https://audit.shecan.ir), Shecan's deployment, checking Iranian mirrors
-every hour (raw data: [report.json](https://audit.shecan.ir/report.json)). · [فارسی](#فارسی)
+every hour (data: [summary.json](https://audit.shecan.ir/summary.json),
+[report.json](https://audit.shecan.ir/report.json), [history.json](https://audit.shecan.ir/history.json)).
+· [Methodology](METHODOLOGY.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [فارسی](#فارسی)
 
 A mirror is trusted by every client that points at it. Docker, for one, pulls `alpine:3.20` from a
 mirror and checks no publisher signature: it trusts the digest the mirror names. npm, PyPI, Cargo
@@ -37,8 +39,35 @@ mean equal content, and a client verifies the file against that hash.
 ```bash
 python3 pkg_audit.py examples/images.txt examples/docker-mirrors.txt \
   --packages examples/packages.txt --targets examples/targets.txt \
-  --brand examples/brand.json --json site/report.json --html site/index.html
+  --brand examples/brand.json --json site/report.json --summary site/summary.json --html site/index.html
 ```
+
+## Data for other programs
+
+Three JSON files are written next to the page; `serve.py` serves them with
+`Access-Control-Allow-Origin: *`. All times are UTC (`2026-11-04T10:00:00Z`).
+
+| File | What | Stability |
+| --- | --- | --- |
+| `summary.json` (`--summary`) | per group and mirror: counts by verdict, `healthy`, `checked_at`, `via`, 30-day history share, `score_points`, time per check (`check_ms`: median, p90, n); per provider: `score`, `rank`; the methodology version, vantage and operator disclosure | versioned contract `pkg-audit/summary@1`, [JSON Schema](schema/summary-v1.schema.json) |
+| `report.json` (`--json`) | every item of every mirror: verdict, value compared, detail, `ms` | `pkg-audit/report@1`; fields are only added |
+| `history.json` (`--history`) | daily counts per mirror and every change of verdict | internal format, may change |
+
+Identifiers are stable: a group `id` (`npm`, `docker`, `docker-mcr-microsoft-com`, `debian`, ...) is
+also the anchor of its section on the page (`https://audit.shecan.ir/#npm`), and a mirror's `name`
+is the name in the lists. A field that was not measured is `null`, never a guess; `healthy: null`
+means nothing was measured yet. Within `@1` fields are only added; removing one or changing its
+meaning changes the `schema` string. Consumers should check `schema` and `methodology.version`, use
+`checked_at` (not `generated_at`) for how fresh a mirror's result is, and treat a missing or older
+file as "no data", not as a bad result.
+
+Questions an agent can answer from `summary.json` alone: which mirrors have a complete, healthy
+measurement (`status`, `healthy`); how a mirror compares with the others of its group (same
+`items`, `counts`, `history.ok_share`, `check_ms` with the same `via`); how recent each result is
+(`checked_at`); how it was measured (`methodology`, `vantage`); what is unavailable (`null`
+fields, `pending` counts). An MCP server is not provided: these files answer the same questions
+with less to run; [pkg.shecan.ir's MCP server](https://pkg.shecan.ir/mcp/) reads `summary.json`
+for Shecan's own mirrors.
 
 ### Spread the checks over the hour
 
@@ -70,7 +99,7 @@ python3 pkg_audit.py ... --state site/report.json --json site/report.json \
 `serve.py` serves the page and takes re-check requests (standard library only):
 
 ```bash
-python3 serve.py --site site --queue queue.json --cooldown 30 --port 8080
+python3 serve.py --site site --queue queue.json --cooldown 30 --port 8080   # --proxies N: reverse proxies in front (default 1)
 # the same, and run the auditor itself every 5 minutes (no cron, timer or CI schedule):
 python3 serve.py --site site --queue queue.json --run-every 5 -- images.txt mirrors.txt --state site/report.json \
   --queue queue.json --slots 12 --json site/report.json --html site/index.html
@@ -100,8 +129,14 @@ The page groups mirrors by the registrable domain of their host (`mirror.example
   and at least 90% of them match the official source.
 - Its history is its share of ok answers over the last 30 days (no answer is not counted). Until two
   weeks of history exist, everyone's history counts as full, so nobody loses for the time before it.
+- A repository in an ecosystem where it is the only provider checked scores like any other: offering
+  what nobody else offers is worth something. Which ecosystems are listed is the operator's choice, so
+  the page marks those groups and `summary.json` gives each group's `providers` and each provider's
+  `healthy_alone`; sum `score_points` over groups with `providers >= 2` to compare only where
+  providers compete.
 - Ties go to fewer mismatches, then the higher share of ok answers, then the name. Visitors can also
-  sort by share ok, number of repositories or name; the formula is explained under the table.
+  sort by share ok, number of repositories or name; the formula is explained under the table and in
+  [METHODOLOGY.md](METHODOLOGY.md), versioned (`methodology` in the data).
 - Once two weeks of history exist, each provider also shows its last 30 days.
 
 The auditor is run by Shecan (audit.shecan.ir), which also runs mirrors that appear on the page.
@@ -127,8 +162,12 @@ Mirrors that need an account or credit to answer are left out.
 ## Test
 
 ```bash
-python3 tests/test_pkg_audit.py
+python3 tests/test_pkg_audit.py && python3 tests/test_serve.py && python3 tests/test_tunnel.py
 ```
+
+Offline (no network): verdicts, the score and its reproducibility from `summary.json`, the
+summary's JSON Schema, statistics, history, the page's escaping, re-check limits, the tunnel, and the
+safety limits (redirects and token realms into private networks, answer sizes).
 
 ## License
 

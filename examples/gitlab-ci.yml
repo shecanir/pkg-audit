@@ -9,7 +9,7 @@ audit:
   script:
     - python3 -c "import urllib.request as u; u.urlretrieve('https://raw.githubusercontent.com/shecanir/pkg-audit/$PKG_AUDIT_COMMIT/pkg_audit.py', 'pkg_audit.py')"
     - mkdir -p site
-    - python3 pkg_audit.py images.txt docker-mirrors.txt --packages packages.txt --targets targets.txt --brand brand.json --state site/report.json --slots 12 --slot-minutes 5 --json site/report.json --html site/index.html
+    - python3 pkg_audit.py images.txt docker-mirrors.txt --packages packages.txt --targets targets.txt --brand brand.json --state site/report.json --slots 12 --slot-minutes 5 --json site/report.json --summary site/summary.json --html site/index.html
   artifacts:
     when: always
     paths: [site]

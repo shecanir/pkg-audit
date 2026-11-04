@@ -1,0 +1,17 @@
+name: Add a mirror or ecosystem
+description: Propose a public mirror to be checked
+labels: [mirror]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: Mirror URL and ecosystem
+      description: e.g. https://mirror.example.ir/npm (npm). Mirrors that need an account or credit are not listed.
+    validations:
+      required: true
+  - type: textarea
+    id: lines
+    attributes:
+      label: List lines (optional)
+      description: The lines for docker-mirrors.txt or targets.txt, see examples/.
+      render: text

@@ -78,6 +78,18 @@ STUCK_AFTER = 120    # seconds a thread may go without finishing a request befor
 GRACE = 45           # seconds after the budget before stuck threads are abandoned
 GIVE_UP_AFTER = 3    # consecutive items that timed out or could not connect: skip the rest of that mirror
 
+# Versions of what is published. METHODOLOGY_VERSION changes whenever what is checked, how a verdict
+# is reached or how the score is computed changes (METHODOLOGY.md lists every version), so results of
+# different methods are never compared as if they were alike. The schemas change only on a breaking
+# change to report.json or summary.json; new fields are added without one.
+METHODOLOGY_VERSION = "2026.11.1"
+REPORT_SCHEMA = "pkg-audit/report@1"
+SUMMARY_SCHEMA = "pkg-audit/summary@1"
+# No answer is read past this many bytes (a Go module zip has its own limit): a mirror is not trusted
+# to end its answer. The largest metadata asked for (an npm packument served in full) is far below it.
+MAX_BODY = 128 << 20
+MAX_REDIRECTS = 5
+
 
 PROGRESS = {}
 
@@ -117,6 +129,82 @@ def unreachable(exc):
     """True for failures that say the host is not answering at all (not an HTTP status)."""
     return isinstance(exc, (TimeoutError, OSError, http.client.HTTPException)) and not isinstance(
         exc, urllib.error.HTTPError)
+
+
+def is_public_address(value):
+    """True for an address on the public internet (not loopback, private, link-local such as the
+    169.254.169.254 metadata service, multicast or reserved)."""
+    try:
+        return ipaddress.ip_address(value.split("%", 1)[0]).is_global
+    except ValueError:
+        return False
+
+
+def is_public_host(host, resolve=True):
+    """A literal address must be public; a name must not be localhost-like and, when `resolve`, every
+    address it resolves to here must be public. A name that does not resolve is let through: the
+    connection then fails on its own."""
+    host = (host or "").strip("[]").rstrip(".").lower()
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host.split("%", 1)[0])
+        return is_public_address(host)
+    except ValueError:
+        pass
+    if host == "localhost" or host.endswith((".localhost", ".local", ".internal")):
+        return False
+    if not resolve:
+        return True
+    try:
+        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return True
+    return all(is_public_address(info[4][0]) for info in infos)
+
+
+def check_follow(origin, target, tunnel=False):
+    """Refuse to follow a mirror from a public address to a non-public one (a redirect, or the token
+    realm a registry names): a mirror must not make the auditor ask the check server's own network
+    or a cloud metadata service. Only http and https are followed. A mirror that is itself on a
+    private address (a test, a mirror inside the operator's network) may send the auditor anywhere.
+    Through the tunnel names are resolved at its far end, so only literal addresses and
+    localhost-like names can be checked here. The address is checked when the redirect is followed,
+    not again at connect time: a name that changes its answer in between (DNS rebinding) is a
+    remaining risk, limited by the auditor publishing only hashes and short error texts."""
+    to = urllib.parse.urlsplit(target)
+    if to.scheme not in ("http", "https"):
+        raise RuntimeError(f"refused to follow a {to.scheme or 'relative'} URL")
+    if not is_public_host(urllib.parse.urlsplit(origin).hostname, resolve=not tunnel):
+        return
+    if not is_public_host(to.hostname, resolve=not tunnel):
+        raise RuntimeError(f"refused to follow to a non-public address ({to.hostname})")
+
+
+class GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """urllib's redirect handling, with check_follow on every hop and at most MAX_REDIRECTS hops."""
+    max_redirections = MAX_REDIRECTS
+
+    def __init__(self, tunnel=False):
+        self.tunnel = tunnel
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        check_follow(req.full_url, newurl, self.tunnel)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def opener_for(url):
+    """The opener for one URL: through the tunnel when the mirror uses it, always with guarded redirects."""
+    tunnel = via_tunnel(url)
+    handlers = [GuardedRedirect(tunnel)] + ([TunnelHandler] if tunnel else [])
+    return urllib.request.build_opener(*handlers)
+
+
+def read_limited(resp, limit=MAX_BODY):
+    body = resp.read(limit + 1)
+    if len(body) > limit:
+        raise RuntimeError(f"answer longer than {limit} bytes")
+    return body
 
 
 class Pinned(http.client.HTTPSConnection):
@@ -219,7 +307,7 @@ class Registry:
             try:
                 conn.request(method, path, headers=headers)
                 resp = conn.getresponse()
-                body = resp.read()
+                body = read_limited(resp)
                 if resp.status == 401 and attempt == 0:
                     self.tokens[repo] = self.token(resp.getheader("WWW-Authenticate", ""), repo)
                     continue
@@ -230,13 +318,16 @@ class Registry:
                     if target.hostname == self.host:
                         return self.request(method, target.path + ("?" + target.query if target.query else ""),
                                             repo, hops + 1)
+                    check_follow(f"https://{self.host}", target.geturl(), self.tunnel)
                     follow = urllib.request.Request(target.geturl(), method=method, headers={"Accept": ACCEPT})
-                    opener = urllib.request.build_opener(TunnelHandler) if self.tunnel else urllib.request.build_opener()
-                    with opener.open(follow, timeout=30) as final:
-                        return final.status, final, final.read()
+                    with self.opener().open(follow, timeout=30) as final:
+                        return final.status, final, read_limited(final)
                 return resp.status, resp, body
             finally:
                 conn.close()
+
+    def opener(self):
+        return opener_for(f"https://{self.host}")
 
     def token(self, challenge, repo):
         """A pull token from the realm the registry names. For a mirror asked through the tunnel the
@@ -247,9 +338,9 @@ class Registry:
         fields = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
         query = urllib.parse.urlencode({"service": fields.get("service", ""),
                                         "scope": f"repository:{repo}:pull"})
-        opener = urllib.request.build_opener(TunnelHandler) if self.tunnel else urllib.request.build_opener()
-        with opener.open(f"{fields['realm']}?{query}", timeout=30) as resp:
-            data = json.load(resp)
+        check_follow(f"https://{self.host}", fields.get("realm", ""), self.tunnel)
+        with self.opener().open(f"{fields['realm']}?{query}", timeout=30) as resp:
+            data = json.loads(read_limited(resp, 1 << 20))
         return data.get("token") or data["access_token"]
 
     def digest(self, repo, tag):
@@ -335,7 +426,8 @@ def check_rows(items, rows, check):
     time. `rows` is filled as it goes: if the run is cut short, what was done is still there.
     An item that was not checked (out of time) gets no row: it shows as "in the queue" and the
     mirror counts as unfinished, so the next run checks it, instead of an error that would stand
-    until the mirror's next turn."""
+    until the mirror's next turn. A check that gave a value records how long it took (`ms`: wall time
+    of all its requests, retries included); see check_time for what that number can and cannot say."""
     down = 0
     for item in items:
         progress()
@@ -346,7 +438,9 @@ def check_rows(items, rows, check):
             row.update(verdict="unreachable", detail=skip_reason(down))
             continue
         try:
+            started = time.monotonic()
             check(item, row)
+            row["ms"] = round((time.monotonic() - started) * 1000)
             down = 0
         except Exception as exc:
             row.update(verdict=failure_verdict(str(exc), exc), detail=str(exc))
@@ -400,7 +494,7 @@ def docker_group(refs, mirrors, active, prior_group=None):
     else:
         gid, title, note = "docker", "Docker", "digest هر تگ در برابر رجیستری رسمی همان ایمیج"
     group = {"id": gid, "title": title, "items": [ref for ref in refs if split(ref)[0] in registries],
-             "mirrors": {}, "note": note}
+             "mirrors": {}, "note": note, "official": [f"https://{upstream}" for upstream in sorted(registries)]}
     prior = (prior_group or {}).get("mirrors", {})
     wanted = sorted({upstream for name, _, upstream, _ in mirrors if name in active})
 
@@ -520,17 +614,15 @@ TITLES = {
 
 def get(url, accept="*/*", tries=3, limit=None):
     """GET with a few retries: a mirror or the official source resetting one connection is not a verdict.
-    With a limit, a body longer than that many bytes is an error (and is not read past the limit)."""
+    A body longer than `limit` (default MAX_BODY) bytes is an error and is not read past the limit;
+    redirects are followed only as check_follow allows."""
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "pkg-audit/1"})
     last = None
-    opener = urllib.request.build_opener(TunnelHandler) if via_tunnel(url) else urllib.request.build_opener()
+    opener = opener_for(url)
     for attempt in range(tries):
         try:
             with opener.open(req, timeout=45) as resp:
-                body = resp.read() if limit is None else resp.read(limit + 1)
-                if limit is not None and len(body) > limit:
-                    raise RuntimeError(f"answer longer than {limit} bytes")
-                return resp.headers.get("Content-Type", ""), body
+                return resp.headers.get("Content-Type", ""), read_limited(resp, MAX_BODY if limit is None else limit)
         except urllib.error.HTTPError as exc:
             if exc.code < 500 and exc.code != 429:
                 raise RuntimeError(f"HTTP {exc.code}")
@@ -646,7 +738,7 @@ def package_group(kind, items, targets, active, prior_group=None):
     """Like docker_group, for one package ecosystem (one official job, none if no mirror is due)."""
     official = {}
     title, note = TITLES[kind]
-    group = {"id": kind, "title": title, "items": list(items), "mirrors": {}, "note": note}
+    group = {"id": kind, "title": title, "items": list(items), "mirrors": {}, "note": note, "official": [OFFICIAL[kind]]}
     prior = (prior_group or {}).get("mirrors", {})
 
     def ask_official():
@@ -1008,9 +1100,12 @@ DEFAULT_BRAND = {
     "credits_html": "",              # trusted HTML: extra <li> items (your own deployment tools) in the credits section
     "site_url": "",                  # public URL of the page, e.g. https://audit.example.com; enables link previews
     "source_url": "",                # public repository of this tool; shown in the header and the notes
-    "og_image": "/og.jpg",
+    "og_image": "/og.jpg",           # 1200x630 JPEG, path under site_url, for link previews (Telegram, Bale, ...)
     "recheck_minutes": 0,            # >0: show "request a re-check" buttons; a mirror can be re-checked
-                                     # this many minutes after its last check (needs serve.py)           # 1200x630 JPEG, path under site_url, for link previews (Telegram, Bale, ...)
+                                     # this many minutes after its last check (needs serve.py)
+    "vantage": {},                   # where the checks are made from, by `via` ("direct", "tunnel"): a country or
+                                     # region, never an address; published in report.json and summary.json
+    "disclosure": "",                # plain text: who runs this page and which listed mirrors are theirs
 }
 BRAND = dict(DEFAULT_BRAND)
 
@@ -1076,7 +1171,7 @@ details.m[open] summary:after{transform:translateY(2px) rotate(135deg)}
 .sq.miss{background:var(--miss)}.sq.fail{background:var(--fail)}
 .items{margin:0;padding:2px 18px 12px;list-style:none;border-top:1px dashed var(--line)}
 .items li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
-.items li:last-child{border-bottom:0}
+.items li:last-child{border-bottom:0}.items li.tm{color:var(--muted);font-size:12.5px}
 .items code{direction:ltr;font:13px ui-monospace,Menlo,Consolas,monospace;overflow-wrap:anywhere}
 .b{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;flex:none}
 .b.ok{color:var(--ok);background:var(--okbg)}.b.stale{color:var(--stale);background:var(--stalebg)}
@@ -1355,15 +1450,26 @@ def repo_history(history, days, key):
     return ok / answered if answered else 1.0
 
 
+def group_providers(g):
+    """How many providers (domains) are checked in one group. A group with one provider compares it with
+    nobody; its healthy repository still scores (offering what nobody else does is worth something to
+    a user), and the page and summary.json say so, since which ecosystems are listed is the operator's
+    choice."""
+    return len({provider(urllib.parse.urlsplit(m["url"]).hostname) for m in g["mirrors"].values()})
+
+
 def provider_stats(groups, history=None, days=()):
     """Per provider (domain): its ecosystems, verdict counts, mirror keys, how many of its repositories
-    are healthy now, and the score: one point per healthy repository, times that repository's history
-    (its share of ok answers over the last days; full while there is no history yet)."""
+    are healthy now (and how many of them are in groups where it is the only provider checked), and the
+    score: one point per healthy repository, times that repository's history (its share of ok answers
+    over the last days; full while there is no history yet)."""
     per = {}
+    alone = {g["id"] for g in groups if group_providers(g) < 2}
     for g in groups:
         for n, m in g["mirrors"].items():
             p = provider(urllib.parse.urlsplit(m["url"]).hostname)
-            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "healthy": 0, "score": 0.0})
+            v = per.setdefault(p, {"groups": [], "counts": {}, "keys": [], "ours": False, "healthy": 0, "score": 0.0,
+                                   "healthy_alone": 0})
             if g["title"] not in v["groups"]:
                 v["groups"].append(g["title"])
             key = f"{g['id']}/{n}"
@@ -1373,8 +1479,10 @@ def provider_stats(groups, history=None, days=()):
             verdicts = [row_of(m["rows"], item)["verdict"] for item in refs]
             for verdict in verdicts:
                 v["counts"][verdict] = v["counts"].get(verdict, 0) + 1
-            if refs and "mismatch" not in verdicts and verdicts.count("ok") >= HEALTHY_SHARE * len(refs):
+            healthy = bool(refs) and "mismatch" not in verdicts and verdicts.count("ok") >= HEALTHY_SHARE * len(refs)
+            if healthy:
                 v["healthy"] += 1
+                v["healthy_alone"] += g["id"] in alone
                 v["score"] += repo_history(history, days, key)
     for v in per.values():
         v["total"] = sum(n for k, n in v["counts"].items() if k != "pending")
@@ -1406,6 +1514,8 @@ def providers(groups, history, days, fa):
         num = lambda x: fa(round(x)) if abs(x - round(x)) < .05 else fa(f"{x:.1f}").replace(".", "٫")
         score = num(v["score"]) if total else "—"
         why = (f"{fa(v['healthy'])} مخزن سالم از {fa(repos)}"
+               + (f" ({fa(v['healthy_alone'])} از آن‌ها در اکوسیستمی که فقط همین ارائه‌دهنده در آن بررسی می‌شود)"
+                  if v["healthy_alone"] else "")
                + (f"، ضرب در سابقه‌ی {fa(min(len(days), HISTORY_BAR_DAYS))} روز گذشته‌ی هر کدام" if days else
                   "؛ سابقه هنوز کامل نیست و برای همه کامل حساب می‌شود") + ".")
         share = ok / total if total else 0
@@ -1434,11 +1544,96 @@ def rank_note():
            f'پیشنهاد دهید یا pull request بفرستید تا اضافه شود؛ '
            f'<a href="{html.escape(src)}#how-providers-are-ranked" rel="noopener">توضیح کامل</a>.') if src else ""
     return ('<p class="vfoot"><b>امتیاز چطور حساب می‌شود؟</b> هر <b>مخزن سالم</b> یک امتیاز دارد، ضرب در '
-            '<b>سابقه‌اش</b>. مخزن (میرور یک اکوسیستم) وقتی سالم است که هیچ مورد ناهمخوانی نداشته باشد و دست‌کم '
+            '<b>سابقه‌اش</b>؛ در اکوسیستمی هم که فقط یک ارائه‌دهنده در آن بررسی می‌شود، چون داشتن میروری که دیگران '
+            'ندارند برای کاربر ارزش دارد (این اکوسیستم‌ها کنار عنوانشان مشخص شده‌اند). مخزن (میرور یک اکوسیستم) وقتی سالم است که هیچ مورد ناهمخوانی نداشته باشد و دست‌کم '
             '۹۰٪ موردهایش همان مقدار منبع رسمی را بدهند. سابقه، سهم پاسخ‌های سالم همان مخزن در ۳۰ روز گذشته است '
             '(بی‌پاسخ حساب نمی‌شود)؛ تا وقتی سابقه‌ی دو هفته جمع نشده، سابقه‌ی همه کامل حساب می‌شود. در امتیاز برابر، '
             'ناهمخوانی کمتر، درصد پاسخ سالم بیشتر و بعد نام جلو می‌افتد. '
             f'همه‌ی ارائه‌دهنده‌ها، از جمله شکن، با همین فرمول سنجیده می‌شوند.{ask}</p>')
+
+
+def nearest_rank(sorted_values, p):
+    """The p-th percentile by the nearest-rank method (always one of the values, never interpolated)."""
+    return sorted_values[max(0, -(-len(sorted_values) * p // 100) - 1)]
+
+
+def check_time(rows):
+    """Median and 90th percentile of the time the checks of one mirror took, in milliseconds, with the
+    number of checks; None when no check gave a value. The time is the wall time of all requests of a
+    check (retries and, for Docker, the token and manifest requests included), measured from the
+    auditor's vantage point while other hosts are checked at the same time. It is comparable between
+    mirrors of one group asked the same way (same `via`), not between groups, and it is not a download
+    speed. It never enters the score."""
+    times = sorted(r["ms"] for r in rows.values() if isinstance(r.get("ms"), int))
+    if not times:
+        return None
+    return {"median": nearest_rank(times, 50), "p90": nearest_rank(times, 90), "n": len(times)}
+
+
+def summary(report, history=None):
+    """The compact, versioned view of a report for other programs (SUMMARY_SCHEMA, documented in
+    schema/summary-v1.schema.json and README.md): per mirror its counts, whether it is healthy, the
+    history that weighs its score and the points it adds, and per provider the score and rank the page
+    shows. Every number is computed by the same functions as the page, so it can be recomputed from
+    report.json and history.json. Nothing is estimated: what was not measured is null."""
+    days = history_days(history)
+    shown = days[-HISTORY_BAR_DAYS:]
+    base = BRAND["site_url"].rstrip("/")
+    src = BRAND["source_url"].rstrip("/")
+    groups = []
+    for g in report["groups"]:
+        mirrors = []
+        for name, m in g["mirrors"].items():
+            refs = m.get("items", g["items"])
+            verdicts = [row_of(m["rows"], item)["verdict"] for item in refs]
+            counts = {v: verdicts.count(v) for v in BADGE if verdicts.count(v)}
+            measured = len(refs) - counts.get("pending", 0)
+            healthy = (bool(refs) and "mismatch" not in verdicts and verdicts.count("ok") >= HEALTHY_SHARE * len(refs)
+                       ) if measured else None
+            key = f"{g['id']}/{name}"
+            ok = answered = silent = 0
+            for d in shown:
+                c = history["days"][d].get(key, {})
+                ok += c.get("ok", 0)
+                answered += sum(n for k, n in c.items() if k not in ("unreachable", "pending"))
+                silent += c.get("unreachable", 0)
+            weight = repo_history(history, days, key)
+            host = urllib.parse.urlsplit(m["url"]).hostname
+            mirrors.append({
+                "name": name, "host": host, "provider": provider(host), "url": m["url"],
+                "via": m.get("via", "direct"), "checked_at": m.get("checked_at"),
+                "items": len(refs), "measured": measured, "counts": counts,
+                "status": "pending" if not measured else "complete" if measured == len(refs) else "partial",
+                "healthy": healthy,
+                "history": {"days": len(shown), "ok": ok, "answered": answered, "unanswered": silent,
+                            "ok_share": round(ok / answered, 4) if shown and answered else None},
+                "score_points": round(weight, 4) if healthy else 0,
+                "check_ms": check_time(m["rows"]),
+                "queued": bool(m.get("queued")),
+                **({"report_url": f"{base}/#{g['id']}"} if base else {}),
+            })
+        groups.append({"id": g["id"], "title": g["title"], "official": g.get("official", []),
+                       "providers": group_providers(g), "items": list(g["items"]), "mirrors": mirrors})
+    per = provider_stats(report["groups"], history, days)
+    ranked = sorted(per.items(), key=lambda kv: (-round(kv[1]["score"], 2), kv[1]["counts"].get("mismatch", 0),
+                                                 -(kv[1]["counts"].get("ok", 0) / kv[1]["total"] if kv[1]["total"] else 0),
+                                                 kv[0]))
+    providers_out = [{"provider": p, "rank": i + 1, "score": round(v["score"], 4), "healthy": v["healthy"],
+                      "healthy_alone": v["healthy_alone"],
+                      "repositories": len(v["keys"]), "counts": v["counts"]} for i, (p, v) in enumerate(ranked)]
+    return {
+        "schema": SUMMARY_SCHEMA,
+        "generated_at": report["generated"],
+        "methodology": {"version": METHODOLOGY_VERSION,
+                        **({"url": f"{src}/blob/main/METHODOLOGY.md"} if src else {})},
+        "operator": {"name": BRAND["name"], "disclosure": BRAND.get("disclosure", "")},
+        "vantage": BRAND.get("vantage") or {},
+        "rules": {"healthy_share": HEALTHY_SHARE, "history_days": HISTORY_BAR_DAYS,
+                  "history_counts_after_days": HISTORY_SHOWN_AFTER, "old_after_seconds": STALE_AFTER,
+                  "history_complete": bool(days)},
+        "groups": groups,
+        "providers": providers_out,
+    }
 
 
 def render_group(g, fa, history=None, days=(), pscore=None):
@@ -1479,6 +1674,10 @@ def render_group(g, fa, history=None, days=(), pscore=None):
                       f'data-m="{html.escape(n)}" data-checked="{html.escape(m.get("checked_at") or "")}"'
                       f'{" data-queued=1" if m.get("queued") else ""}>درخواست بررسی مجدد</button>'
                       f'<span class="rs" aria-live="polite"></span></li>')
+        took = check_time(rows)
+        if took:  # how long its checks took; never part of the score (see check_time)
+            items += (f'<li class="tm"><span>زمان هر بررسی</span><span>میانه {fa(took["median"])} میلی‌ثانیه · '
+                      f'صدک ۹۰: {fa(took["p90"])} · {fa(took["n"])} نمونه</span></li>')
         for ref in sorted(refs, key=lambda r: row_of(rows, r)["verdict"] == "ok"):  # problems first
             cls, icon, label = BADGE[row_of(rows, ref)["verdict"]]
             value, detail = row_of(rows, ref)["value"] or "", row_of(rows, ref)["detail"]
@@ -1490,7 +1689,29 @@ def render_group(g, fa, history=None, days=(), pscore=None):
                 f'<div class="score {tone}">{fa(pct)}٪<small>{fa(done)} از {fa(len(refs))}</small></div>'
                 f'<div class="strip">{strip}</div></summary><ul class="items">{items}</ul></details>')
     return (f'<h2 class="gt" id="{g["id"]}">{html.escape(g["title"])}</h2>'
-            f'<p class="gn">{html.escape(g["note"])}</p><div class="list">{out}</div>')
+            f'<p class="gn">{html.escape(g["note"])}'
+            f'{" · فقط یک ارائه‌دهنده این‌جا بررسی می‌شود؛ مقایسه‌ای با میرور دیگر در کار نیست" if group_providers(g) < 2 else ""}</p>'
+            f'<div class="list">{out}</div>')
+
+
+def dataset_ld(report, base):
+    """schema.org Dataset for the published data (JSON-LD), so search engines and agents find it as data."""
+    src = BRAND["source_url"].rstrip("/")
+    data = {
+        "@context": "https://schema.org", "@type": "Dataset",
+        "name": BRAND["title"], "description": BRAND["description"], "url": base + "/",
+        "dateModified": report["generated"], "isAccessibleForFree": True, "inLanguage": "fa",
+        "creator": {"@type": "Organization", "name": BRAND["name"] or BRAND["title"]},
+        "measurementTechnique": "Comparison of package hashes, image digests and checksum files served by each "
+                                "mirror with those of the official source (methodology " + METHODOLOGY_VERSION + ")",
+        "variableMeasured": ["verdict per item (ok, stale, mismatch, missing, unreachable, error)",
+                             "share of ok answers over 30 days", "time per check (ms)"],
+        "distribution": [{"@type": "DataDownload", "encodingFormat": "application/json", "contentUrl": f"{base}/{f}"}
+                         for f in ("summary.json", "report.json", "history.json")],
+        **({"isBasedOn": src} if src else {}),
+    }
+    # "</" can never end the script element early
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 
 def page(report, history=None):
@@ -1572,6 +1793,11 @@ def page(report, history=None):
     src_link = f'<a class="src" href="{html.escape(src)}" rel="noopener">{src_label} ↗</a>' if src else ""
     src_note = (f'<p>کد این بازرس متن‌باز است و هر کسی می‌تواند بخواند، اجرا کند و میرور خودش را اضافه کند: '
                 f'<a href="{html.escape(src)}" dir="ltr">{src_label}</a>.</p>') if src else ""
+    method_link = (f' (<a href="{html.escape(src.rstrip("/"))}/blob/main/METHODOLOGY.md" rel="noopener">شرح کامل و '
+                   f'تاریخچه‌ی تغییرها</a>)') if src else ""
+    where = BRAND.get("vantage") or {}
+    vantage = ("؛ محل بررسی: " + "، ".join(html.escape(f"{v} ({k})") for k, v in sorted(where.items()))) if where else ""
+    disclosure = f'<p>{html.escape(BRAND["disclosure"])}</p>' if BRAND.get("disclosure") else ""
     credits = BRAND["credits_html"]
     script = SCRIPT.replace("__MIN__", str(int(BRAND["recheck_minutes"]))) if BRAND["recheck_minutes"] > 0 else ""
     social = ""
@@ -1585,7 +1811,9 @@ def page(report, history=None):
                   f'<meta property="og:description" content="{d}"><meta property="og:image" content="{img}">'
                   f'<meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">'
                   f'<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="{t}">'
-                  f'<meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{img}">')
+                  f'<meta name="twitter:description" content="{d}"><meta name="twitter:image" content="{img}">'
+                  f'<link rel="alternate" type="application/json" href="{html.escape(base)}/summary.json" title="summary.json">'
+                  f'<script type="application/ld+json">{dataset_ld(report, base)}</script>')
     return f"""<!doctype html>
 <html lang="fa" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1616,6 +1844,13 @@ def page(report, history=None):
 <li>فایل بسته دانلود نمی‌شود (جز ZIP ماژول‌های Go که برای محاسبه‌ی هش دانلود می‌شود)؛ مقدار هش و checksumی سنجیده می‌شود که ابزار نصب از میرور می‌گیرد.</li>
 <li>نام ستون‌ها فقط نشانی میزبان است؛ اینکه کدام شرکت اداره‌اش می‌کند را خودش باید تأیید کند.
 میرورهایی که بدون ثبت‌نام یا اعتبار پاسخ نمی‌دهند بررسی نشده‌اند.</li></ul>
+<h2>روش سنجش و داده‌ها</h2>
+<p>نسخه‌ی روش سنجش: <bdi dir="ltr">{METHODOLOGY_VERSION}</bdi>{method_link}. همه‌ی میرورها با همین روش، همین
+موردها، همین ترتیب و هر کدام یک درخواست در هر لحظه بررسی می‌شوند{vantage}. «زمان هر بررسی» مدت همه‌ی درخواست‌های
+یک بررسی از دید بازرس است (با تلاش دوباره)؛ فقط میان میرورهای یک اکوسیستم قابل مقایسه است، سرعت دانلود نیست و
+در امتیاز حساب نمی‌شود. داده‌ی خلاصه برای برنامه‌ها: <a href="/summary.json" dir="ltr">summary.json</a>؛
+داده‌ی کامل: <a href="/report.json" dir="ltr">report.json</a> و <a href="/history.json" dir="ltr">history.json</a>.</p>
+{disclosure}
 <h2>کد منبع</h2>
 {src_note}
 <h2>برای پروژه‌های حساس</h2>
@@ -1635,7 +1870,7 @@ def page(report, history=None):
 
 def write_atomic(path, text):
     tmp = Path(path + ".tmp")
-    tmp.write_text(text)
+    tmp.write_text(text, encoding="utf-8")
     tmp.replace(path)
 
 
@@ -1663,6 +1898,7 @@ def main():
                                       "and every change of an item's verdict")
     ap.add_argument("--json", help="write the report here")
     ap.add_argument("--html", help="write the static page here")
+    ap.add_argument("--summary", help="write the compact, versioned summary (summary.json, for other programs) here")
     args = ap.parse_args()
     global DEADLINE
     DEADLINE = time.monotonic() + args.max_seconds
@@ -1704,7 +1940,8 @@ def main():
     # Phase 2: ask this run's mirrors; one request at a time per host, several hosts at once.
     mirror_jobs = [job for _, _, after in plans for job in after()]
     run_jobs(mirror_jobs, args.workers)
-    report = {"generated": now_iso(), "groups": [g for g, _, _ in plans if g["items"]]}
+    report = {"generated": now_iso(), "schema": REPORT_SCHEMA, "methodology": METHODOLOGY_VERSION,
+              "vantage": BRAND["vantage"], "groups": [g for g, _, _ in plans if g["items"]]}
     settle(report, active)
     for g in report["groups"]:  # say in the report which mirrors were asked from inside Iran
         for m in g["mirrors"].values():
@@ -1721,6 +1958,8 @@ def main():
         write_atomic(args.json, json.dumps(report, indent=2) + "\n")
     if args.html:
         write_atomic(args.html, page(report, history))
+    if args.summary:
+        write_atomic(args.summary, json.dumps(summary(report, history), indent=1, ensure_ascii=False) + "\n")
     bad = 0
     print(f"turn {slot + 1}/{slots}: {len(active)} mirror entries checked, "
           f"{sum(len(g['mirrors']) for g in report['groups']) - len(active)} kept from the previous run")

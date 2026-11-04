@@ -19,7 +19,10 @@ What keeps this from being used to hammer a mirror:
   - a mirror checked less than --cooldown minutes ago (by anyone, scheduled or requested) is refused
     with the minutes left, so no mirror is checked more than once in that time because of visitors;
   - a pair already in the queue is not added twice, so the queue never exceeds the number of mirrors;
-  - a small per-client rate limit keeps the endpoint itself cheap.
+  - a small per-client rate limit keeps the endpoint itself cheap; the client is the address the
+    trusted proxies (--proxies) saw, so a forged X-Forwarded-For does not get around it.
+JSON, text and Markdown files are served with a charset and `Access-Control-Allow-Origin: *`, so
+other programs (a browser page too) can read report.json and summary.json.
 No access log, no cookies; the client address is used in memory only for that rate limit.
 Standard library only.
 """
@@ -107,8 +110,26 @@ class Limiter:
             return ok
 
 
-def make_handler(site, queue_path, cooldown, limiter):
+def client_of(forwarded, peer, hops):
+    """The address the rate limit counts. X-Forwarded-For is written by the client first and by each
+    proxy after it, so only the entries the `hops` trusted proxies in front of this server appended
+    are believed: the hops-th from the right. hops=0 ignores the header (no proxy in front)."""
+    entries = [e.strip() for e in (forwarded or "").split(",") if e.strip()]
+    if hops <= 0 or not entries:
+        return peer
+    return entries[-hops] if len(entries) >= hops else entries[0]
+
+
+# Data files are read by other programs, often from a browser page: they get a charset and CORS.
+TYPES = {".json": "application/json; charset=utf-8", ".txt": "text/plain; charset=utf-8",
+         ".md": "text/markdown; charset=utf-8", ".xml": "application/xml; charset=utf-8"}
+OPEN_DATA = (".json", ".txt", ".md", ".xml")
+
+
+def make_handler(site, queue_path, cooldown, limiter, hops=1):
     class Handler(SimpleHTTPRequestHandler):
+        extensions_map = {**SimpleHTTPRequestHandler.extensions_map, **TYPES}
+
         def __init__(self, *args, **kwargs):
             super().__init__(*args, directory=str(site), **kwargs)
 
@@ -119,6 +140,8 @@ def make_handler(site, queue_path, cooldown, limiter):
             self.send_header("X-Content-Type-Options", "nosniff")
             if not getattr(self, "_api", False):
                 self.send_header("Cache-Control", "public, max-age=300")
+                if self.path.split("?", 1)[0].endswith(OPEN_DATA):
+                    self.send_header("Access-Control-Allow-Origin", "*")
             super().end_headers()
 
         def list_directory(self, path):  # never list a folder
@@ -145,7 +168,7 @@ def make_handler(site, queue_path, cooldown, limiter):
         def do_POST(self):
             if self.path.split("?", 1)[0] != "/api/recheck":
                 return self.send_json(404, {"status": "unknown"})
-            who = (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+            who = client_of(self.headers.get("X-Forwarded-For"), self.client_address[0], hops)
             if not limiter.allow(who):
                 return self.send_json(429, {"status": "slow-down", "retry_after": 60})
             try:
@@ -176,6 +199,9 @@ def main():
     ap.add_argument("--cooldown", type=int, default=30, help="minutes before a mirror can be re-checked (default %(default)s)")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--host", default="0.0.0.0")
+    ap.add_argument("--proxies", type=int, default=1, metavar="N",
+                    help="trusted reverse proxies in front of this server that append to X-Forwarded-For "
+                         "(default %(default)s; 0 = no proxy, the header is ignored)")
     ap.add_argument("--run-every", type=int, default=0, metavar="MINUTES",
                     help="run pkg_audit.py (arguments after `--`) every N minutes on the clock; 0 = never (default)")
     ap.add_argument("--run-timeout", type=int, default=1500, help="kill a run after this many seconds (default %(default)s)")
@@ -188,7 +214,7 @@ def main():
         cmd = [sys.executable, str(Path(__file__).resolve().parent / "pkg_audit.py"), *rest]
         threading.Thread(target=run_forever, args=(args.run_every, cmd, args.run_timeout), daemon=True).start()
     site = Path(args.site).resolve()
-    handler = make_handler(site, args.queue, args.cooldown, Limiter(RATE_PER_MINUTE))
+    handler = make_handler(site, args.queue, args.cooldown, Limiter(RATE_PER_MINUTE), args.proxies)
     ThreadingHTTPServer((args.host, args.port), handler).serve_forever()
 
 
