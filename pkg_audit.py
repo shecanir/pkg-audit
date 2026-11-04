@@ -1121,6 +1121,7 @@ CSS = """
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
 body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.8 var(--font)}
 a{color:var(--primary);text-decoration:none}a:hover{text-decoration:underline}
+section.note p a,section.note li a,footer a{text-decoration:underline;text-underline-offset:3px}
 .wrap{max-width:980px;margin:0 auto;padding:0 18px}
 header{padding:26px 0 0;display:flex;align-items:center;gap:12px}
 header img{width:40px;height:40px;border-radius:11px;flex:none}
@@ -1823,6 +1824,7 @@ def page(report, history=None):
 <body><div class="wrap">
 <header><img src="/favicon.svg" alt="" width="44" height="44">
 <div class="brand">{html.escape(BRAND["name"])}<small>{html.escape(BRAND["tagline"])}</small></div>{src_link}</header>
+<main id="main">
 <h1>پایش <span>میرورها</span></h1>
 <p class="lead">بسته‌ها و ایمیج‌های پرکاربرد را از هر میرور می‌پرسیم و با پاسخ منبع رسمی مقایسه می‌کنیم،
 از سروری مستقل از میرورها: {fa(len(seen))} میزبان در {fa(len(groups))} اکوسیستم. آخرین بررسی: {when}. هر ساعت تکرار می‌شود.</p>
@@ -1864,6 +1866,7 @@ def page(report, history=None):
 <li><a href="https://www.python.org" rel="noopener" dir="ltr">Python</a> (مجوز PSF): بازرس و سرور این صفحه فقط با کتابخانه‌ی استاندارد پایتون نوشته شده‌اند، بدون وابستگی بیرونی.</li>
 <li><a href="https://github.com/rastikerdar/vazirmatn" rel="noopener" dir="ltr">Vazirmatn</a>، اثر زنده‌یاد صابر راستی‌کردار (مجوز SIL Open Font License 1.1): فونت این صفحه.</li>
 {credits}</ul></section>
+</main>
 <footer>{BRAND["footer_html"]}</footer>
 </div>{SEARCH}{TIP}{script}</body></html>"""
 
